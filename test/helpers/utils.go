@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -400,8 +399,6 @@ func LabelNode(t *testing.T, cs *framework.ClientSet, node corev1.Node, label st
 		return err
 	})
 
-	require.Nil(t, err, "unable to label %s node %s with infra: %s", label, node.Name, err)
-
 	return MakeIdempotent(func() {
 
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
@@ -413,27 +410,9 @@ func LabelNode(t *testing.T, cs *framework.ClientSet, node corev1.Node, label st
 			_, err = cs.CoreV1Interface.Nodes().Update(ctx, n, metav1.UpdateOptions{})
 			return err
 		})
-		require.Nil(t, err, "unable to remove label %q from node %q: %s", label, node.Name, err)
+		require.Nil(t, err, "unable to remove label from node %s: %s", node.Name, err)
+
 	})
-}
-
-// Gets a random node from a given pool
-func GetRandomNode(t *testing.T, cs *framework.ClientSet, pool string) corev1.Node {
-	nodes, err := GetNodesByRole(cs, pool)
-	require.Nil(t, err)
-	require.NotEmpty(t, nodes)
-
-	rand.Seed(time.Now().UnixNano())
-	// Disable gosec here to avoid throwing
-	// G404: Use of weak random number generator (math/rand instead of crypto/rand)
-	// #nosec
-	return nodes[rand.Intn(len(nodes))]
-}
-
-// LabelRandomNodeFromPool gets all nodes in pool and chooses one at random to label
-func LabelRandomNodeFromPool(t *testing.T, cs *framework.ClientSet, pool, label string) func() {
-	infraNode := GetRandomNode(t, cs, pool)
-	return LabelNode(t, cs, infraNode, label)
 }
 
 // GetSingleNodeByRoll gets all nodes by role pool, and asserts there should only be one
@@ -818,4 +797,16 @@ func mcdForNode(cs *framework.ClientSet, node *corev1.Node) (*corev1.Pod, error)
 		return nil, fmt.Errorf("too many (%d) MCDs for node %s", len(mcdList.Items), node.Name)
 	}
 	return &mcdList.Items[0], nil
+}
+
+// takes a func and ensures it is only called once in cleanup.
+func MakeIdempotent(f func()) func() {
+	hasRun := false
+
+	return func() {
+		if !hasRun {
+			f()
+			hasRun = true
+		}
+	}
 }
