@@ -375,7 +375,11 @@ func CreateMCP(t *testing.T, cs *framework.ClientSet, mcpName string) func() {
 	infraMCP.ObjectMeta.Labels = make(map[string]string)
 	infraMCP.ObjectMeta.Labels[mcpName] = ""
 	_, err := cs.MachineConfigPools().Create(context.TODO(), infraMCP, metav1.CreateOptions{})
-	require.Nil(t, err)
+	if err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			require.Nil(t, err)
+		}
+	}
 	return func() {
 		err := cs.MachineConfigPools().Delete(context.TODO(), mcpName, metav1.DeleteOptions{})
 		require.Nil(t, err)
