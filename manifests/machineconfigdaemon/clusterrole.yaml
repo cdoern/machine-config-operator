@@ -26,3 +26,9 @@ rules:
   - subjectaccessreviews
   verbs:
   - create
+- apiGroups:
+    - ""
+    resources:
+      - namespace/metrics
+    verbs:
+      - get

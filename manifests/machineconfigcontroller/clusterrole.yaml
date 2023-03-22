@@ -55,3 +55,9 @@ rules:
   - leases
   verbs:
   - "*"
+- apiGroups:
+  - ""
+  resources:
+    - namespace/metrics
+  verbs:
+    - get
