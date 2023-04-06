@@ -1,3 +1,4 @@
+
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.13 AS builder
 ARG TAGS=""
 WORKDIR /go/src/github.com/openshift/machine-config-operator
