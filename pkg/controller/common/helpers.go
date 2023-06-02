@@ -68,9 +68,11 @@ func boolToPtr(b bool) *bool {
 // Kernel arguments are concatenated.
 // It defaults to the OSImageURL provided by the CVO but allows a MC provided OSImageURL to take precedence.
 func MergeMachineConfigs(configs []*mcfgv1.MachineConfig, cconfig *mcfgv1.ControllerConfig) (*mcfgv1.MachineConfig, error) {
+
 	if len(configs) == 0 {
 		return nil, nil
 	}
+	//configs[0].
 	sort.SliceStable(configs, func(i, j int) bool { return configs[i].Name < configs[j].Name })
 
 	var fips bool
@@ -91,13 +93,18 @@ func MergeMachineConfigs(configs []*mcfgv1.MachineConfig, cconfig *mcfgv1.Contro
 		}
 	}
 
+	files := []ign3types.File{}
 	for idx := 1; idx < len(configs); idx++ {
 		if configs[idx].Spec.Config.Raw != nil {
 			mergedIgn, err := ParseAndConvertConfig(configs[idx].Spec.Config.Raw)
 			if err != nil {
 				return nil, err
 			}
-			outIgn = ign3.Merge(outIgn, mergedIgn)
+			newIgn := ign3.Merge(outIgn, mergedIgn)
+			// now we have our new ign, we need to compare the mergedIgn with the current outIgn
+			outIgn = EvalWithPriorities(newIgn, outIgn, files)
+			files = outIgn.Storage.Files
+
 		}
 	}
 
@@ -190,6 +197,18 @@ func MergeMachineConfigs(configs []*mcfgv1.MachineConfig, cconfig *mcfgv1.Contro
 			Extensions: extensions,
 		},
 	}, nil
+}
+
+func EvalWithPriorities(newIgn ign3types.Config, currIgn ign3types.Config, files []ign3types.File) ign3types.Config {
+	// we can either check storage or check the entire thing somehow
+	for i, entry := range newIgn.Storage.Files {
+		for _, curr := range files {
+			if entry.Node.Path == curr.Node.Path && curr.Contents.Source != entry.Contents.Source { // if our path == an already existing path and we are getting new data
+				newIgn.Storage.Files[i] = curr // default to what we already have
+			}
+		}
+	}
+	return newIgn
 }
 
 // PointerConfig generates the stub ignition for the machine to boot properly
