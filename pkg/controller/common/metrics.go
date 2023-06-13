@@ -58,6 +58,14 @@ func RegisterMetrics(metrics []prometheus.Collector) error {
 	return nil
 }
 
+func UnregisterMetrics(metrics []prometheus.Collector) error {
+	for _, metric := range metrics {
+		prometheus.Unregister(metric)
+	}
+
+	return nil
+}
+
 // StartMetricsListener is metrics listener via http on localhost
 func StartMetricsListener(addr string, stopCh <-chan struct{}, registerFunc func() error) {
 	if addr == "" {

@@ -34,6 +34,7 @@ type renderConfig struct {
 	Infra                  configv1.Infrastructure
 	Constants              map[string]string
 	PointerConfig          string
+	Metrics                *MetricsConfig
 }
 
 type assetRenderer struct {

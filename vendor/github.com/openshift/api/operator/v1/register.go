@@ -72,6 +72,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&InsightsOperatorList{},
 		&Storage{},
 		&StorageList{},
+		&MachineConfiguration{},
+		&MachineConfigurationList{},
 	)
 
 	return nil

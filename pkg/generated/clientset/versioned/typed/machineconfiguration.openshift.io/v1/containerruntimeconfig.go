@@ -4,9 +4,12 @@ package v1
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 	"time"
 
 	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	machineconfigurationopenshiftiov1 "github.com/openshift/machine-config-operator/pkg/generated/applyconfiguration/machineconfiguration.openshift.io/v1"
 	scheme "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -31,6 +34,8 @@ type ContainerRuntimeConfigInterface interface {
 	List(ctx context.Context, opts metav1.ListOptions) (*v1.ContainerRuntimeConfigList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.ContainerRuntimeConfig, err error)
+	Apply(ctx context.Context, containerRuntimeConfig *machineconfigurationopenshiftiov1.ContainerRuntimeConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ContainerRuntimeConfig, err error)
+	ApplyStatus(ctx context.Context, containerRuntimeConfig *machineconfigurationopenshiftiov1.ContainerRuntimeConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ContainerRuntimeConfig, err error)
 	ContainerRuntimeConfigExpansion
 }
 
@@ -161,6 +166,60 @@ func (c *containerRuntimeConfigs) Patch(ctx context.Context, name string, pt typ
 		Name(name).
 		SubResource(subresources...).
 		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied containerRuntimeConfig.
+func (c *containerRuntimeConfigs) Apply(ctx context.Context, containerRuntimeConfig *machineconfigurationopenshiftiov1.ContainerRuntimeConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ContainerRuntimeConfig, err error) {
+	if containerRuntimeConfig == nil {
+		return nil, fmt.Errorf("containerRuntimeConfig provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(containerRuntimeConfig)
+	if err != nil {
+		return nil, err
+	}
+	name := containerRuntimeConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("containerRuntimeConfig.Name must be provided to Apply")
+	}
+	result = &v1.ContainerRuntimeConfig{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("containerruntimeconfigs").
+		Name(*name).
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *containerRuntimeConfigs) ApplyStatus(ctx context.Context, containerRuntimeConfig *machineconfigurationopenshiftiov1.ContainerRuntimeConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ContainerRuntimeConfig, err error) {
+	if containerRuntimeConfig == nil {
+		return nil, fmt.Errorf("containerRuntimeConfig provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(containerRuntimeConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	name := containerRuntimeConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("containerRuntimeConfig.Name must be provided to Apply")
+	}
+
+	result = &v1.ContainerRuntimeConfig{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("containerruntimeconfigs").
+		Name(*name).
+		SubResource("status").
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
 		Body(data).
 		Do(ctx).
 		Into(result)

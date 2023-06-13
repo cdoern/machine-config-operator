@@ -218,6 +218,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	err = dn.ClusterConnect(
 		startOpts.nodeName,
 		kubeClient,
+		ctx.InformerFactory.Operator().V1().MachineConfigurations(),
 		ctx.InformerFactory.Machineconfiguration().V1().MachineConfigs(),
 		ctx.KubeInformerFactory.Core().V1().Nodes(),
 		ctx.InformerFactory.Machineconfiguration().V1().ControllerConfigs(),

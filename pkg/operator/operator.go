@@ -34,11 +34,15 @@ import (
 	configinformersv1 "github.com/openshift/client-go/config/informers/externalversions/config/v1"
 	configlistersv1 "github.com/openshift/client-go/config/listers/config/v1"
 	"github.com/openshift/library-go/pkg/operator/events"
+	"github.com/openshift/library-go/pkg/operator/v1helpers"
 
 	mcfgclientset "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	"github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	mcfginformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io/v1"
 	mcfglistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/machineconfiguration.openshift.io/v1"
+
+	opInformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io/v1"
+	oplistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/operator.openshift.io/v1"
 )
 
 const (
@@ -72,8 +76,11 @@ type Operator struct {
 
 	syncHandler func(ic string) error
 
+	operatorClient v1helpers.StaticPodOperatorClient
+
 	crdLister        apiextlistersv1.CustomResourceDefinitionLister
 	mcpLister        mcfglistersv1.MachineConfigPoolLister
+	mcfgLister       oplistersv1.MachineConfigurationLister
 	ccLister         mcfglistersv1.ControllerConfigLister
 	mcLister         mcfglistersv1.MachineConfigLister
 	deployLister     appslisterv1.DeploymentLister
@@ -96,6 +103,7 @@ type Operator struct {
 	ccListerSynced                   cache.InformerSynced
 	mcListerSynced                   cache.InformerSynced
 	mcoCmListerSynced                cache.InformerSynced
+	mcfgListerSynced                 cache.InformerSynced
 	clusterCmListerSynced            cache.InformerSynced
 	serviceAccountInformerSynced     cache.InformerSynced
 	clusterRoleInformerSynced        cache.InformerSynced
@@ -117,6 +125,9 @@ type Operator struct {
 // New returns a new machine config operator.
 func New(
 	namespace, name, imagesFile string,
+	mcfgInformer opInformersv1.MachineConfigurationInformer,
+	//mcsInformer coreinformersv1.Ma
+	//crInformer mcfginformersv1.MachineConfigInformer
 	mcpInformer mcfginformersv1.MachineConfigPoolInformer,
 	mcInformer mcfginformersv1.MachineConfigInformer,
 	controllerConfigInformer mcfginformersv1.ControllerConfigInformer,
@@ -143,6 +154,13 @@ func New(
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(&coreclientsetv1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
+
+	// need informer for the operator cfg so when one is added we act upon it.
+	mcfgInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    ctrl.addMachineConfig,
+		UpdateFunc: ctrl.updateMachineConfig,
+		DeleteFunc: ctrl.deleteMachineConfig,
+	})
 
 	optr := &Operator{
 		namespace:     namespace,
@@ -175,6 +193,7 @@ func New(
 		infraInformer.Informer(),
 		networkInformer.Informer(),
 		mcpInformer.Informer(),
+		mcfgInformer.Informer(),
 		proxyInformer.Informer(),
 		oseKubeAPIInformer.Informer(),
 		nodeInformer.Informer(),
@@ -189,6 +208,7 @@ func New(
 	optr.clusterCmLister = clusterCmInfomer.Lister()
 	optr.clusterCmListerSynced = clusterCmInfomer.Informer().HasSynced
 	optr.mcpLister = mcpInformer.Lister()
+	optr.mcfgLister = mcfgInformer.Lister()
 	optr.mcpListerSynced = mcpInformer.Informer().HasSynced
 	optr.ccLister = controllerConfigInformer.Lister()
 	optr.ccListerSynced = controllerConfigInformer.Informer().HasSynced
@@ -209,6 +229,7 @@ func New(
 	optr.mcoCmListerSynced = mcoCmInformer.Informer().HasSynced
 	optr.crdLister = crdInformer.Lister()
 	optr.crdListerSynced = crdInformer.Informer().HasSynced
+	optr.mcfgListerSynced = mcfgInformer.Informer().HasSynced
 	optr.deployLister = deployInformer.Lister()
 	optr.deployListerSynced = deployInformer.Informer().HasSynced
 	optr.daemonsetLister = daemonsetInformer.Lister()
@@ -346,11 +367,19 @@ func (optr *Operator) handleErr(err error, key interface{}) {
 }
 
 func (optr *Operator) sync(key string) error {
+	//	spec, _, _, err := optr.operatorClient.GetStaticPodOperatorState()
+	//if err != nil {
+	//		return err
+	//	}
 	startTime := time.Now()
 	glog.V(4).Infof("Started syncing operator %q (%v)", key, startTime)
 	defer func() {
 		glog.V(4).Infof("Finished syncing operator %q (%v)", key, time.Since(startTime))
 	}()
+
+	//	switch spec.invisibleMetrics {
+	//
+	//	}
 
 	// syncFuncs is the list of sync functions that are executed in order.
 	// any error marks sync as failure.

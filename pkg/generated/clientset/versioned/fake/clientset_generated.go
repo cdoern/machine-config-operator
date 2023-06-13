@@ -6,6 +6,8 @@ import (
 	clientset "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/typed/machineconfiguration.openshift.io/v1"
 	fakemachineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/typed/machineconfiguration.openshift.io/v1/fake"
+	operatorv1 "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/typed/operator.openshift.io/v1"
+	fakeoperatorv1 "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/typed/operator.openshift.io/v1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -66,4 +68,9 @@ var (
 // MachineconfigurationV1 retrieves the MachineconfigurationV1Client
 func (c *Clientset) MachineconfigurationV1() machineconfigurationv1.MachineconfigurationV1Interface {
 	return &fakemachineconfigurationv1.FakeMachineconfigurationV1{Fake: &c.Fake}
+}
+
+// OperatorV1 retrieves the OperatorV1Client
+func (c *Clientset) OperatorV1() operatorv1.OperatorV1Interface {
+	return &fakeoperatorv1.FakeOperatorV1{Fake: &c.Fake}
 }

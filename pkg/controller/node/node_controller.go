@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+
 	"sort"
 	"time"
+
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
+	opinformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io/v1"
+	mcfglistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/machineconfiguration.openshift.io/v1"
+	oplistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/operator.openshift.io/v1"
 
 	"github.com/golang/glog"
 	configv1 "github.com/openshift/api/config/v1"
@@ -21,7 +27,6 @@ import (
 	mcfgclientset "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	"github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	mcfginformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io/v1"
-	mcfglistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/machineconfiguration.openshift.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,15 +81,17 @@ type Controller struct {
 	syncHandler              func(mcp string) error
 	enqueueMachineConfigPool func(*mcfgv1.MachineConfigPool)
 
-	ccLister   mcfglistersv1.ControllerConfigLister
-	mcLister   mcfglistersv1.MachineConfigLister
-	mcpLister  mcfglistersv1.MachineConfigPoolLister
-	nodeLister corelisterv1.NodeLister
+	ccLister    mcfglistersv1.ControllerConfigLister
+	mcLister    mcfglistersv1.MachineConfigLister
+	mcpLister   mcfglistersv1.MachineConfigPoolLister
+	nodeLister  corelisterv1.NodeLister
+	opCfgLister oplistersv1.MachineConfigurationLister
 
-	ccListerSynced   cache.InformerSynced
-	mcListerSynced   cache.InformerSynced
-	mcpListerSynced  cache.InformerSynced
-	nodeListerSynced cache.InformerSynced
+	ccListerSynced    cache.InformerSynced
+	mcListerSynced    cache.InformerSynced
+	mcpListerSynced   cache.InformerSynced
+	nodeListerSynced  cache.InformerSynced
+	opcfgListerSynced cache.InformerSynced
 
 	schedulerList         cligolistersv1.SchedulerLister
 	schedulerListerSynced cache.InformerSynced
@@ -94,6 +101,7 @@ type Controller struct {
 
 // New returns a new node controller.
 func New(
+	opCfgInformer opinformersv1.MachineConfigurationInformer,
 	ccInformer mcfginformersv1.ControllerConfigInformer,
 	mcInformer mcfginformersv1.MachineConfigInformer,
 	mcpInformer mcfginformersv1.MachineConfigPoolInformer,
@@ -131,10 +139,12 @@ func New(
 	ctrl.syncHandler = ctrl.syncMachineConfigPool
 	ctrl.enqueueMachineConfigPool = ctrl.enqueueDefault
 
+	ctrl.opCfgLister = opCfgInformer.Lister()
 	ctrl.ccLister = ccInformer.Lister()
 	ctrl.mcLister = mcInformer.Lister()
 	ctrl.mcpLister = mcpInformer.Lister()
 	ctrl.nodeLister = nodeInformer.Lister()
+	ctrl.opcfgListerSynced = opCfgInformer.Informer().HasSynced
 	ctrl.ccListerSynced = ccInformer.Informer().HasSynced
 	ctrl.mcListerSynced = mcInformer.Informer().HasSynced
 	ctrl.mcpListerSynced = mcpInformer.Informer().HasSynced
@@ -558,8 +568,10 @@ func (ctrl *Controller) deleteNode(obj interface{}) {
 	}
 
 	// Clear any associated MCCDrainErr, if any.
-	if ctrlcommon.MCCDrainErr.DeleteLabelValues(node.Name) {
-		glog.Infof("Cleaning up MCCDrain error for node(%s) as it is being deleted", node.Name)
+	if !ctrl.invisibleMetricSet(op.InvisibleMetricMCCDrainErr) {
+		if ctrlcommon.MCCDrainErr.DeleteLabelValues(node.Name) {
+			glog.Infof("Cleaning up MCCDrain error for node(%s) as it is being deleted", node.Name)
+		}
 	}
 
 	glog.V(4).Infof("Node %s delete", node.Name)
@@ -1166,4 +1178,19 @@ func getErrorString(err error) string {
 		return err.Error()
 	}
 	return ""
+}
+
+func (ctrl *Controller) invisibleMetricSet(metric op.InvisibleMetric) bool {
+	operatorConfigs, err := ctrl.opCfgLister.List(labels.Everything())
+	if err != nil {
+		return false
+	}
+	for _, cfg := range operatorConfigs {
+		for _, m := range cfg.Spec.InvisibleMetrics {
+			if metric == m {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -4,9 +4,12 @@ package v1
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 	"time"
 
 	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	machineconfigurationopenshiftiov1 "github.com/openshift/machine-config-operator/pkg/generated/applyconfiguration/machineconfiguration.openshift.io/v1"
 	scheme "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -31,6 +34,8 @@ type ControllerConfigInterface interface {
 	List(ctx context.Context, opts metav1.ListOptions) (*v1.ControllerConfigList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.ControllerConfig, err error)
+	Apply(ctx context.Context, controllerConfig *machineconfigurationopenshiftiov1.ControllerConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ControllerConfig, err error)
+	ApplyStatus(ctx context.Context, controllerConfig *machineconfigurationopenshiftiov1.ControllerConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ControllerConfig, err error)
 	ControllerConfigExpansion
 }
 
@@ -161,6 +166,60 @@ func (c *controllerConfigs) Patch(ctx context.Context, name string, pt types.Pat
 		Name(name).
 		SubResource(subresources...).
 		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied controllerConfig.
+func (c *controllerConfigs) Apply(ctx context.Context, controllerConfig *machineconfigurationopenshiftiov1.ControllerConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ControllerConfig, err error) {
+	if controllerConfig == nil {
+		return nil, fmt.Errorf("controllerConfig provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(controllerConfig)
+	if err != nil {
+		return nil, err
+	}
+	name := controllerConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("controllerConfig.Name must be provided to Apply")
+	}
+	result = &v1.ControllerConfig{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("controllerconfigs").
+		Name(*name).
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *controllerConfigs) ApplyStatus(ctx context.Context, controllerConfig *machineconfigurationopenshiftiov1.ControllerConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.ControllerConfig, err error) {
+	if controllerConfig == nil {
+		return nil, fmt.Errorf("controllerConfig provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(controllerConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	name := controllerConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("controllerConfig.Name must be provided to Apply")
+	}
+
+	result = &v1.ControllerConfig{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("controllerconfigs").
+		Name(*name).
+		SubResource("status").
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
 		Body(data).
 		Do(ctx).
 		Into(result)

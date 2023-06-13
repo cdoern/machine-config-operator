@@ -11,6 +11,9 @@ import (
 // MCO package; and thus consumed by other users
 
 const (
+	OperatorConfig = "cluster"
+)
+const (
 	// APIServerURLFile is the path to the apiserver url environment file.
 	// See templates/master/00-master/_base/files/apiserver-url-env.yaml
 	APIServerURLFile = "/etc/kubernetes/apiserver-url.env"

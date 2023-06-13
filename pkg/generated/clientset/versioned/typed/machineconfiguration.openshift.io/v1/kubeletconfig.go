@@ -4,9 +4,12 @@ package v1
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 	"time"
 
 	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	machineconfigurationopenshiftiov1 "github.com/openshift/machine-config-operator/pkg/generated/applyconfiguration/machineconfiguration.openshift.io/v1"
 	scheme "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -31,6 +34,8 @@ type KubeletConfigInterface interface {
 	List(ctx context.Context, opts metav1.ListOptions) (*v1.KubeletConfigList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.KubeletConfig, err error)
+	Apply(ctx context.Context, kubeletConfig *machineconfigurationopenshiftiov1.KubeletConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.KubeletConfig, err error)
+	ApplyStatus(ctx context.Context, kubeletConfig *machineconfigurationopenshiftiov1.KubeletConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.KubeletConfig, err error)
 	KubeletConfigExpansion
 }
 
@@ -161,6 +166,60 @@ func (c *kubeletConfigs) Patch(ctx context.Context, name string, pt types.PatchT
 		Name(name).
 		SubResource(subresources...).
 		VersionedParams(&opts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied kubeletConfig.
+func (c *kubeletConfigs) Apply(ctx context.Context, kubeletConfig *machineconfigurationopenshiftiov1.KubeletConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.KubeletConfig, err error) {
+	if kubeletConfig == nil {
+		return nil, fmt.Errorf("kubeletConfig provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(kubeletConfig)
+	if err != nil {
+		return nil, err
+	}
+	name := kubeletConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("kubeletConfig.Name must be provided to Apply")
+	}
+	result = &v1.KubeletConfig{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("kubeletconfigs").
+		Name(*name).
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
+		Body(data).
+		Do(ctx).
+		Into(result)
+	return
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *kubeletConfigs) ApplyStatus(ctx context.Context, kubeletConfig *machineconfigurationopenshiftiov1.KubeletConfigApplyConfiguration, opts metav1.ApplyOptions) (result *v1.KubeletConfig, err error) {
+	if kubeletConfig == nil {
+		return nil, fmt.Errorf("kubeletConfig provided to Apply must not be nil")
+	}
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(kubeletConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	name := kubeletConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("kubeletConfig.Name must be provided to Apply")
+	}
+
+	result = &v1.KubeletConfig{}
+	err = c.client.Patch(types.ApplyPatchType).
+		Resource("kubeletconfigs").
+		Name(*name).
+		SubResource("status").
+		VersionedParams(&patchOpts, scheme.ParameterCodec).
 		Body(data).
 		Do(ctx).
 		Into(result)

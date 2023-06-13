@@ -149,6 +149,7 @@ func (f *fixture) newController() *Daemon {
 	}
 	d.ClusterConnect("node_name_test",
 		f.kubeclient,
+		i.Operator().V1().MachineConfigurations(),
 		i.Machineconfiguration().V1().MachineConfigs(),
 		k8sI.Core().V1().Nodes(),
 		i.Machineconfiguration().V1().ControllerConfigs(),

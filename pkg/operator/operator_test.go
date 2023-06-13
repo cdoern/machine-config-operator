@@ -64,13 +64,13 @@ func TestMetrics(t *testing.T) {
 	})
 	require.Nil(t, err)
 
-	metric := testutil.ToFloat64(mcoMachineCount.WithLabelValues("worker"))
+	metric := testutil.ToFloat64(MCOMachineCount.WithLabelValues("worker"))
 	assert.Equal(t, metric, float64(2))
 
-	metric = testutil.ToFloat64(mcoUpdatedMachineCount.WithLabelValues("worker"))
+	metric = testutil.ToFloat64(MCOUpdatedMachineCount.WithLabelValues("worker"))
 	assert.Equal(t, metric, float64(1))
 
-	metric = testutil.ToFloat64(mcoDegradedMachineCount.WithLabelValues("worker"))
+	metric = testutil.ToFloat64(MCODegradedMachineCount.WithLabelValues("worker"))
 	assert.Equal(t, metric, float64(1))
 
 }

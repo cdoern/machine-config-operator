@@ -446,6 +446,7 @@ func createControllers(ctx *ctrlcommon.ControllerContext) []ctrlcommon.Controlle
 		),
 		containerruntimeconfig.New(
 			templatesDir,
+			ctx.InformerFactory.Operator().V1().MachineConfigurations(),
 			ctx.InformerFactory.Machineconfiguration().V1().MachineConfigPools(),
 			ctx.InformerFactory.Machineconfiguration().V1().ControllerConfigs(),
 			ctx.InformerFactory.Machineconfiguration().V1().ContainerRuntimeConfigs(),
@@ -462,6 +463,7 @@ func createControllers(ctx *ctrlcommon.ControllerContext) []ctrlcommon.Controlle
 		// the above sub-controllers, which are then consumed by the node controller
 		render.New(
 			ctx.InformerFactory.Machineconfiguration().V1().MachineConfigPools(),
+			ctx.InformerFactory.Operator().V1().MachineConfigurations(),
 			ctx.InformerFactory.Machineconfiguration().V1().MachineConfigs(),
 			ctx.InformerFactory.Machineconfiguration().V1().ControllerConfigs(),
 			ctx.ClientBuilder.KubeClientOrDie("render-controller"),
@@ -469,6 +471,7 @@ func createControllers(ctx *ctrlcommon.ControllerContext) []ctrlcommon.Controlle
 		),
 		// The node controller consumes data written by the above
 		node.New(
+			ctx.InformerFactory.Operator().V1().MachineConfigurations(),
 			ctx.InformerFactory.Machineconfiguration().V1().ControllerConfigs(),
 			ctx.InformerFactory.Machineconfiguration().V1().MachineConfigs(),
 			ctx.InformerFactory.Machineconfiguration().V1().MachineConfigPools(),

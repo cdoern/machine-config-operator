@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	operatoropenshiftiov1 "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
 )
@@ -47,6 +48,10 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Machineconfiguration().V1().MachineConfigs().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("machineconfigpools"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Machineconfiguration().V1().MachineConfigPools().Informer()}, nil
+
+		// Group=operator.openshift.io, Version=v1
+	case operatoropenshiftiov1.SchemeGroupVersion.WithResource("machineconfigurations"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Operator().V1().MachineConfigurations().Informer()}, nil
 
 	}
 

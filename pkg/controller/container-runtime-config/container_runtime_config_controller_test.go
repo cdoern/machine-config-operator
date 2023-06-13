@@ -205,7 +205,7 @@ func (f *fixture) newController() *Controller {
 	i := informers.NewSharedInformerFactory(f.client, noResyncPeriodFunc())
 	ci := configv1informer.NewSharedInformerFactory(f.imgClient, noResyncPeriodFunc())
 	oi := operatorinformer.NewSharedInformerFactory(f.operatorClient, noResyncPeriodFunc())
-	c := New(templateDir,
+	c := New(templateDir, i.Operator().V1().MachineConfigurations(),
 		i.Machineconfiguration().V1().MachineConfigPools(),
 		i.Machineconfiguration().V1().ControllerConfigs(),
 		i.Machineconfiguration().V1().ContainerRuntimeConfigs(),

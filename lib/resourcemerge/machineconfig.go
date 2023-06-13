@@ -3,8 +3,14 @@ package resourcemerge
 import (
 	"github.com/openshift/library-go/pkg/operator/resource/resourcemerge"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	opv1 "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 )
+
+func EnsureOperatorConfig(modified *bool, existing *opv1.MachineConfiguration, required opv1.MachineConfiguration) {
+	resourcemerge.EnsureObjectMeta(modified, &existing.ObjectMeta, required.ObjectMeta)
+	ensureOperatorSpec(modified, existing, required)
+}
 
 // EnsureMachineConfig ensures that the existing matches the required.
 // modified is set to true when existing had to be updated with required.
@@ -41,6 +47,13 @@ func EnsureMachineConfigPool(modified *bool, existing *mcfgv1.MachineConfigPool,
 	if !equality.Semantic.DeepEqual(existing.Spec.NodeSelector, required.Spec.NodeSelector) {
 		*modified = true
 		existing.Spec.NodeSelector = required.Spec.NodeSelector
+	}
+}
+
+func ensureOperatorSpec(modified *bool, existing *opv1.MachineConfiguration, required opv1.MachineConfiguration) {
+	if !equality.Semantic.DeepEqual(existing.Spec, required.Spec) {
+		*modified = true
+		(*existing).Spec = required.Spec
 	}
 }
 

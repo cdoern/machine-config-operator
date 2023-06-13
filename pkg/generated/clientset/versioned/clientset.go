@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/typed/machineconfiguration.openshift.io/v1"
+	operatorv1 "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/typed/operator.openshift.io/v1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
@@ -15,17 +16,24 @@ import (
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
 	MachineconfigurationV1() machineconfigurationv1.MachineconfigurationV1Interface
+	OperatorV1() operatorv1.OperatorV1Interface
 }
 
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
 	machineconfigurationV1 *machineconfigurationv1.MachineconfigurationV1Client
+	operatorV1             *operatorv1.OperatorV1Client
 }
 
 // MachineconfigurationV1 retrieves the MachineconfigurationV1Client
 func (c *Clientset) MachineconfigurationV1() machineconfigurationv1.MachineconfigurationV1Interface {
 	return c.machineconfigurationV1
+}
+
+// OperatorV1 retrieves the OperatorV1Client
+func (c *Clientset) OperatorV1() operatorv1.OperatorV1Interface {
+	return c.operatorV1
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -76,6 +84,10 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 	if err != nil {
 		return nil, err
 	}
+	cs.operatorV1, err = operatorv1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	if err != nil {
+		return nil, err
+	}
 
 	cs.DiscoveryClient, err = discovery.NewDiscoveryClientForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
@@ -98,6 +110,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
 	cs.machineconfigurationV1 = machineconfigurationv1.New(c)
+	cs.operatorV1 = operatorv1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs

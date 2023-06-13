@@ -64,7 +64,7 @@ func (f *fixture) newController() *Controller {
 
 	i := informers.NewSharedInformerFactory(f.client, noResyncPeriodFunc())
 
-	c := New(i.Machineconfiguration().V1().MachineConfigPools(), i.Machineconfiguration().V1().MachineConfigs(),
+	c := New(i.Machineconfiguration().V1().MachineConfigPools(), i.Operator().V1().MachineConfigurations(), i.Machineconfiguration().V1().MachineConfigs(),
 		i.Machineconfiguration().V1().ControllerConfigs(), k8sfake.NewSimpleClientset(), f.client)
 
 	c.mcpListerSynced = alwaysReady

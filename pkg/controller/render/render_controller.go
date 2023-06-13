@@ -9,12 +9,15 @@ import (
 	"github.com/golang/glog"
 	mcoResourceApply "github.com/openshift/machine-config-operator/lib/resourceapply"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	daemonconsts "github.com/openshift/machine-config-operator/pkg/daemon/constants"
 	mcfgclientset "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	"github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	mcfginformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io/v1"
+	opinformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io/v1"
 	mcfglistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/machineconfiguration.openshift.io/v1"
+	oplistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/operator.openshift.io/v1"
 	"github.com/openshift/machine-config-operator/pkg/version"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -23,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+
 	clientset "k8s.io/client-go/kubernetes"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -61,6 +65,9 @@ type Controller struct {
 	mcpLister mcfglistersv1.MachineConfigPoolLister
 	mcLister  mcfglistersv1.MachineConfigLister
 
+	opcfgLister       oplistersv1.MachineConfigurationLister
+	opcfgListerSynced cache.InformerSynced
+
 	mcpListerSynced cache.InformerSynced
 	mcListerSynced  cache.InformerSynced
 
@@ -73,6 +80,7 @@ type Controller struct {
 // New returns a new render controller.
 func New(
 	mcpInformer mcfginformersv1.MachineConfigPoolInformer,
+	opInformer opinformersv1.MachineConfigurationInformer,
 	mcInformer mcfginformersv1.MachineConfigInformer,
 	ccInformer mcfginformersv1.ControllerConfigInformer,
 	kubeClient clientset.Interface,
@@ -98,6 +106,9 @@ func New(
 		UpdateFunc: ctrl.updateMachineConfig,
 		DeleteFunc: ctrl.deleteMachineConfig,
 	})
+
+	ctrl.opcfgLister = opInformer.Lister()
+	ctrl.opcfgListerSynced = opInformer.Informer().HasSynced
 
 	ctrl.syncHandler = ctrl.syncMachineConfigPool
 	ctrl.enqueueMachineConfigPool = ctrl.enqueueDefault
@@ -489,10 +500,11 @@ func (ctrl *Controller) syncGeneratedMachineConfig(pool *mcfgv1.MachineConfigPoo
 
 	// Emit event and collect metric when OSImageURL was overridden.
 	if generated.Spec.OSImageURL != ctrlcommon.GetDefaultBaseImageContainer(&cc.Spec) {
-		ctrlcommon.OSImageURLOverride.WithLabelValues(pool.Name).Set(1)
+		if !ctrl.invisibleMetricSet(op.InvisibleMetricOSImageURLOverride) {
+			ctrlcommon.OSImageURLOverride.WithLabelValues(pool.Name).Set(1)
+		}
 		ctrl.eventRecorder.Eventf(generated, corev1.EventTypeNormal, "OSImageURLOverridden", "OSImageURL was overridden via machineconfig in %s (was: %s is: %s)", generated.Name, cc.Spec.OSImageURL, generated.Spec.OSImageURL)
-	} else {
-		// Reset metric when OSImageURL has not been overridden
+	} else if !ctrl.invisibleMetricSet(op.InvisibleMetricOSImageURLOverride) {
 		ctrlcommon.OSImageURLOverride.WithLabelValues(pool.Name).Set(0)
 	}
 
@@ -661,4 +673,19 @@ func getMachineConfigsForPool(pool *mcfgv1.MachineConfigPool, configs []*mcfgv1.
 		return nil, fmt.Errorf("couldn't find any MachineConfigs for pool: %v", pool.Name)
 	}
 	return out, nil
+}
+
+func (ctrl *Controller) invisibleMetricSet(metric op.InvisibleMetric) bool {
+	operatorConfigs, err := ctrl.opcfgLister.List(labels.Everything())
+	if err != nil {
+		return false
+	}
+	for _, cfg := range operatorConfigs {
+		for _, m := range cfg.Spec.InvisibleMetrics {
+			if metric == m {
+				return true
+			}
+		}
+	}
+	return false
 }

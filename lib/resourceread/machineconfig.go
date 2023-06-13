@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	opv1 "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
@@ -18,6 +19,27 @@ func init() {
 	if err := mcfgv1.AddToScheme(mcfgScheme); err != nil {
 		panic(err)
 	}
+}
+
+func ReadOperatorConfigurationV1(object []byte) (*opv1.MachineConfiguration, error) {
+	if object == nil {
+		return nil, errors.New("invalid machine configuration")
+	}
+
+	m, err := runtime.Decode(mcfgCodecs.UniversalDecoder(opv1.SchemeGroupVersion), object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode raw bytes to opv1.SchemeGroupVersion: %w", err)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("expected opv1.SchemeGroupVersion but got nil")
+	}
+
+	mcfg, ok := m.(*opv1.MachineConfiguration)
+	if !ok {
+		return nil, fmt.Errorf("expected *opv1.MachineConfiguration but found %T", m)
+	}
+
+	return mcfg, nil
 }
 
 // ReadMachineConfigV1 reads raw MachineConfig object from bytes. Returns MachineConfig and error.

@@ -16,9 +16,14 @@ import (
 
 	"github.com/golang/glog"
 	configclientscheme "github.com/openshift/client-go/config/clientset/versioned/scheme"
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
+
+	//"github.com/openshift/machine-config-operator/pkg/operator"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -228,6 +233,10 @@ func (optr *Operator) syncRenderConfig(_ *renderConfig) error {
 		return err
 	}
 
+	if err := optr.syncOperatorConfigurations(); err != nil {
+		return err
+	}
+
 	if optr.inClusterBringup {
 		glog.V(4).Info("Starting inClusterBringup informers cache sync")
 		// sync now our own informers after having installed the CRDs
@@ -425,6 +434,34 @@ func getIgnitionHost(infraStatus *configv1.InfrastructureStatus) (string, error)
 	}
 
 	return ignitionHost, nil
+}
+
+func (optr *Operator) syncOperatorConfigurations() error {
+	configs := []string{
+		"manifests/operator-config.yaml",
+	}
+
+	for _, config := range configs {
+		cfgBytes, err := manifests.ReadFile(config)
+		if err != nil {
+			return err
+		}
+		c, err := mcoResourceRead.ReadOperatorConfigurationV1(cfgBytes)
+		if err != nil {
+			return err
+		}
+		_, _, err = mcoResourceApply.ApplyOperatorConfiguration(optr.client.OperatorV1(), c)
+		if err != nil {
+			return err
+		}
+		// need to figure out if we need to wait for something
+		/*if updated {
+			if err := optr.waitForOperatorConfigurations(c); err != nil {
+				return err
+			}
+		}*/
+	}
+	return nil
 }
 
 func (optr *Operator) syncCustomResourceDefinitions() error {
@@ -885,6 +922,67 @@ const (
 	controllerConfigCompletedInterval = time.Second
 	controllerConfigCompletedTimeout  = 5 * time.Minute
 )
+
+func (optr *Operator) waitForOperatorConfigurations(resource *op.MachineConfiguration) error {
+	var lastErr error
+	if err := wait.Poll(customResourceReadyInterval, customResourceReadyTimeout, func() (bool, error) {
+		//cfg, err := optr.mcfgLister.Get(resource.Name)
+		//if err != nil {
+		//	lastErr = fmt.Errorf("error getting MCFG %s: %w", resource.Name, err)
+		//	return false, nil
+		//}
+		// Maybe wait for status?
+		/*
+			// if insivible metrics exist, we should unregister them
+			if len(cfg.Spec.InvisibleMetrics) > 0 {
+				metrics := []prometheus.Collector{}
+				for _, metric := range cfg.Spec.InvisibleMetrics {
+					switch metric {
+					case op.InvisibleMetricHostOS:
+						metrics = append(metrics, daemon.HostOS)
+					case op.InvisibleMetricKubeletHealthState:
+						metrics = append(metrics, daemon.KubeletHealthState)
+					case op.InvisibleMetricMCCDrainErr:
+						// RENAME
+						metrics = append(metrics, common.MCCDrainErr)
+					case op.InvisibleMetricMCDPivotErr:
+						metrics = append(metrics, daemon.MCDPivotErr)
+					case op.InvisibleMetricMCDRebootErr:
+						metrics = append(metrics, daemon.MCDRebootErr)
+					case op.InvisibleMetricMCDSSHAccessed:
+						metrics = append(metrics, daemon.MCDSSHAccessed)
+					case op.InvisibleMetricMCDState:
+						metrics = append(metrics, daemon.MCDState)
+					case op.InvisibleMetricMCODegradedMachineCount:
+						metrics = append(metrics, MCODegradedMachineCount)
+					case op.InvisibleMetricMCDUpdateState:
+						metrics = append(metrics, daemon.MCDUpdateState)
+					case op.InvisibleMetricMCOMachineCount:
+						metrics = append(metrics, MCOMachineCount)
+					case op.InvisibleMetricMCOUnavailableMachineCount:
+						metrics = append(metrics, MCOUnavailableMachineCount)
+					case op.InvisibleMetricOSImageURLOverride:
+						metrics = append(metrics, common.OSImageURLOverride)
+					case op.InvisibleMetricMCOState:
+						metrics = append(metrics, MCOState)
+					case op.InvisibleMetricMCOUpdatedMachineCount:
+						metrics = append(metrics, MCOUpdatedMachineCount)
+					}
+				}
+				if err := ctrlcommon.UnregisterMetrics(metrics); err != nil {
+					return false, err
+				}
+			}*/
+		return true, nil
+	}); err != nil {
+		if err == wait.ErrWaitTimeout {
+			errs := kubeErrs.NewAggregate([]error{err, lastErr})
+			return fmt.Errorf("error during syncMachineConfigurations: %w", errs)
+		}
+		return err
+	}
+	return nil
+}
 
 func (optr *Operator) waitForCustomResourceDefinition(resource *apiextv1.CustomResourceDefinition) error {
 	var lastErr error

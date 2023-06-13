@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformersv1 "k8s.io/client-go/informers/core/v1"
@@ -35,11 +36,14 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	mcoResourceRead "github.com/openshift/machine-config-operator/lib/resourceread"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	"github.com/openshift/machine-config-operator/pkg/daemon/constants"
 	"github.com/openshift/machine-config-operator/pkg/daemon/osrelease"
 	mcfginformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io/v1"
+	opinformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io/v1"
 	mcfglistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/machineconfiguration.openshift.io/v1"
+	oplistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/operator.openshift.io/v1"
 )
 
 // Daemon is the dispatch point for the functions of the agent on the
@@ -73,6 +77,9 @@ type Daemon struct {
 
 	// kubeClient allows interaction with Kubernetes, including the node we are running on.
 	kubeClient kubernetes.Interface
+
+	opcfgLister       oplistersv1.MachineConfigurationLister
+	opcfgListerSynced cache.InformerSynced
 
 	// nodeLister is used to watch for updates via the informer
 	nodeLister       corev1lister.NodeLister
@@ -242,7 +249,10 @@ func New(
 	if !mock {
 		hostos, err = osrelease.GetHostRunningOS()
 		if err != nil {
-			hostOS.WithLabelValues("unsupported", "").Set(1)
+			//	if !dn.invisibleMetricSet(op.InvisibleMetricHostOS) {
+			// ISSUE IF SET INVISIBLE
+			HostOS.WithLabelValues("unsupported", "").Set(1)
+			//	}
 			return nil, fmt.Errorf("checking operating system: %w", err)
 		}
 	}
@@ -284,8 +294,9 @@ func New(
 		}
 	}
 
+	// ISSUE IF SET INVISIBLE
 	// report OS & version (if RHCOS or FCOS) to prometheus
-	hostOS.WithLabelValues(hostos.ToPrometheusLabel(), osVersion).Set(1)
+	HostOS.WithLabelValues(hostos.ToPrometheusLabel(), osVersion).Set(1)
 
 	return &Daemon{
 		mock:                  mock,
@@ -308,6 +319,7 @@ func New(
 func (dn *Daemon) ClusterConnect(
 	name string,
 	kubeClient kubernetes.Interface,
+	opInformer opinformersv1.MachineConfigurationInformer,
 	mcInformer mcfginformersv1.MachineConfigInformer,
 	nodeInformer coreinformersv1.NodeInformer,
 	ccInformer mcfginformersv1.ControllerConfigInformer,
@@ -328,6 +340,8 @@ func (dn *Daemon) ClusterConnect(
 		AddFunc:    dn.handleNodeEvent,
 		UpdateFunc: func(oldObj, newObj interface{}) { dn.handleNodeEvent(newObj) },
 	})
+	dn.opcfgLister = opInformer.Lister()
+	dn.opcfgListerSynced = opInformer.Informer().HasSynced
 	dn.nodeLister = nodeInformer.Lister()
 	dn.nodeListerSynced = nodeInformer.Informer().HasSynced
 	dn.mcLister = mcInformer.Lister()
@@ -482,6 +496,9 @@ type unreconcilableErr struct {
 }
 
 func (dn *Daemon) updateErrorState(err error) error {
+	if !dn.invisibleMetricSet(op.InvisibleMetricMCDState) {
+		return nil
+	}
 	var uErr *unreconcilableErr
 	if errors.As(err, &uErr) {
 		dn.nodeWriter.SetUnreconcilable(err)
@@ -1149,8 +1166,10 @@ func (dn *Daemon) runLoginMonitor(stopCh <-chan struct{}, exitCh chan<- error) {
 }
 
 func (dn *Daemon) applySSHAccessedAnnotation() error {
-	if err := dn.nodeWriter.SetSSHAccessed(); err != nil {
-		return fmt.Errorf("error: cannot apply annotation for SSH access due to: %w", err)
+	if !dn.invisibleMetricSet(op.InvisibleMetricMCDSSHAccessed) {
+		if err := dn.nodeWriter.SetSSHAccessed(); err != nil {
+			return fmt.Errorf("error: cannot apply annotation for SSH access due to: %w", err)
+		}
 	}
 	return nil
 }
@@ -1225,7 +1244,9 @@ func (dn *Daemon) stopConfigDriftMonitor() {
 
 func (dn *Daemon) runKubeletHealthzMonitor(stopCh <-chan struct{}, exitCh chan<- error) {
 	failureCount := 0
-	kubeletHealthState.Set(float64(failureCount))
+	if !dn.invisibleMetricSet(op.InvisibleMetricKubeletHealthState) {
+		KubeletHealthState.Set(float64(failureCount))
+	}
 	for {
 		select {
 		case <-stopCh:
@@ -1239,7 +1260,9 @@ func (dn *Daemon) runKubeletHealthzMonitor(stopCh <-chan struct{}, exitCh chan<-
 				// reset failure count on success
 				failureCount = 0
 			}
-			kubeletHealthState.Set(float64(failureCount))
+			if !dn.invisibleMetricSet(op.InvisibleMetricKubeletHealthState) {
+				KubeletHealthState.Set(float64(failureCount))
+			}
 		}
 	}
 }
@@ -1417,7 +1440,7 @@ func (dn *Daemon) getStateAndConfigs(pendingConfigName string) (*stateAndConfigs
 		}
 	}
 
-	UpdateStateMetric(mcdState, state, degradedReason)
+	UpdateStateMetric(MCDState, state, degradedReason)
 
 	return &stateAndConfigs{
 		bootstrapping: bootstrapping,
@@ -1917,7 +1940,9 @@ func (dn *Daemon) updateConfigAndState(state *stateAndConfigs) (bool, error) {
 			// let's mark it done!
 			glog.Infof("Completing pending config %s", state.pendingConfig.GetName())
 			if err := dn.completeUpdate(state.pendingConfig.GetName()); err != nil {
-				UpdateStateMetric(mcdUpdateState, "", err.Error())
+				if !dn.invisibleMetricSet(op.InvisibleMetricMCDState) {
+					UpdateStateMetric(MCDUpdateState, "", err.Error())
+				}
 				return inDesiredConfig, err
 			}
 
@@ -1938,13 +1963,18 @@ func (dn *Daemon) updateConfigAndState(state *stateAndConfigs) (bool, error) {
 		if state.state == constants.MachineConfigDaemonStateDegraded {
 			if err := dn.nodeWriter.SetDone(state.currentConfig.GetName()); err != nil {
 				errLabelStr := fmt.Sprintf("error setting node's state to Done: %v", err)
-				UpdateStateMetric(mcdUpdateState, "", errLabelStr)
+				if !dn.invisibleMetricSet(op.InvisibleMetricMCDState) {
+
+					UpdateStateMetric(MCDUpdateState, "", errLabelStr)
+				}
 				return inDesiredConfig, fmt.Errorf("error setting node's state to Done: %w", err)
 			}
 		}
 
 		glog.Infof("In desired config %s", state.currentConfig.GetName())
-		UpdateStateMetric(mcdUpdateState, state.currentConfig.GetName(), "")
+		if !dn.invisibleMetricSet(op.InvisibleMetricMCDState) {
+			UpdateStateMetric(MCDUpdateState, state.currentConfig.GetName(), "")
+		}
 	}
 
 	// No errors have occurred. Returns true if currentConfig == desiredConfig, false otherwise (needs update)
@@ -2327,5 +2357,20 @@ func forceFileExists() bool {
 		return true
 	}
 
+	return false
+}
+
+func (dn *Daemon) invisibleMetricSet(metric op.InvisibleMetric) bool {
+	operatorConfigs, err := dn.opcfgLister.List(labels.Everything())
+	if err != nil {
+		return false
+	}
+	for _, cfg := range operatorConfigs {
+		for _, m := range cfg.Spec.InvisibleMetrics {
+			if metric == m {
+				return true
+			}
+		}
+	}
 	return false
 }

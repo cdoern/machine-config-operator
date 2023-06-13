@@ -11,6 +11,7 @@ import (
 	"github.com/golang/glog"
 	configv1 "github.com/openshift/api/config/v1"
 	cov1helpers "github.com/openshift/library-go/pkg/config/clusteroperator/v1helpers"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,7 +21,10 @@ import (
 
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
+	"github.com/openshift/machine-config-operator/pkg/controller/common"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
+	"github.com/openshift/machine-config-operator/pkg/daemon"
 )
 
 // syncVersion handles reporting the version to the clusteroperator
@@ -358,6 +362,56 @@ func (optr *Operator) syncUpgradeableStatus() error {
 }
 
 func (optr *Operator) syncMetrics() error {
+	operatorConfigs, err := optr.mcfgLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+
+	// am I allowed to do this... retrieve and pass other components metrics?
+	metrics := []prometheus.Collector{}
+	noMCOState, noMCOMachineCount, noMCODegradedMachineCount, noMCOUnavailableMachineCount, noMCOUpdatedMachineCount := false, false, false, false, false
+	for _, cfg := range operatorConfigs {
+		for _, metric := range cfg.Spec.InvisibleMetrics {
+			switch metric {
+			case op.InvisibleMetricHostOS:
+				metrics = append(metrics, daemon.HostOS)
+			case op.InvisibleMetricKubeletHealthState:
+				metrics = append(metrics, daemon.KubeletHealthState)
+			case op.InvisibleMetricMCCDrainErr:
+				// RENAME
+				metrics = append(metrics, common.MCCDrainErr)
+			case op.InvisibleMetricMCDPivotErr:
+				metrics = append(metrics, daemon.MCDPivotErr)
+			case op.InvisibleMetricMCDRebootErr:
+				metrics = append(metrics, daemon.MCDRebootErr)
+			case op.InvisibleMetricMCDSSHAccessed:
+				metrics = append(metrics, daemon.MCDSSHAccessed)
+			case op.InvisibleMetricMCDState:
+				metrics = append(metrics, daemon.MCDState)
+			case op.InvisibleMetricMCODegradedMachineCount:
+				metrics = append(metrics, MCODegradedMachineCount)
+			case op.InvisibleMetricMCDUpdateState:
+				metrics = append(metrics, daemon.MCDUpdateState)
+			case op.InvisibleMetricMCOMachineCount:
+				metrics = append(metrics, MCOMachineCount)
+				noMCOMachineCount = true
+			case op.InvisibleMetricMCOUnavailableMachineCount:
+				noMCOUnavailableMachineCount = true
+				metrics = append(metrics, MCOUnavailableMachineCount)
+			case op.InvisibleMetricOSImageURLOverride:
+				metrics = append(metrics, common.OSImageURLOverride)
+			case op.InvisibleMetricMCOState:
+				noMCOState = true
+				metrics = append(metrics, MCOState)
+			case op.InvisibleMetricMCOUpdatedMachineCount:
+				noMCOUpdatedMachineCount = true
+				metrics = append(metrics, MCOUpdatedMachineCount)
+			}
+		}
+		if err := ctrlcommon.UnregisterMetrics(metrics); err != nil {
+			return err
+		}
+	}
 	pools, err := optr.mcpLister.List(labels.Everything())
 	if err != nil {
 		return err
@@ -374,11 +428,22 @@ func (optr *Operator) syncMetrics() error {
 			}
 		}
 		glog.Infof("Condition: %s, Machines: %d, UpdatedMachines: %d, DegradedMachines: %d, UnavailableMachines: %d", string(cond.Type), pool.Status.MachineCount, pool.Status.UpdatedMachineCount, pool.Status.DegradedMachineCount, pool.Status.UnavailableMachineCount)
-		mcoState.WithLabelValues(pool.Name, string(cond.Type), cond.Reason).SetToCurrentTime()
-		mcoMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.MachineCount))
-		mcoUpdatedMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.UpdatedMachineCount))
-		mcoDegradedMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.DegradedMachineCount))
-		mcoUnavailableMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.UnavailableMachineCount))
+
+		if !noMCOState {
+			MCOState.WithLabelValues(pool.Name, string(cond.Type), cond.Reason).SetToCurrentTime()
+		}
+		if !noMCOMachineCount {
+			MCOMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.MachineCount))
+		}
+		if !noMCOUpdatedMachineCount {
+			MCOUpdatedMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.UpdatedMachineCount))
+		}
+		if !noMCODegradedMachineCount {
+			MCODegradedMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.DegradedMachineCount))
+		}
+		if !noMCOUnavailableMachineCount {
+			MCOUnavailableMachineCount.WithLabelValues(pool.Name).Set(float64(pool.Status.UnavailableMachineCount))
+		}
 	}
 	return nil
 }

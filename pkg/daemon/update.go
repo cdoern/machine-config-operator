@@ -26,6 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
+
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	"github.com/openshift/machine-config-operator/pkg/daemon/constants"
 	pivottypes "github.com/openshift/machine-config-operator/pkg/daemon/pivot/types"
@@ -2083,7 +2085,9 @@ func (dn *Daemon) reboot(rationale string) error {
 	rebootCmd := rebootCommand(rationale)
 	if err := rebootCmd.Run(); err != nil {
 		logSystem("failed to run reboot: %v", err)
-		mcdRebootErr.Inc()
+		if !dn.invisibleMetricSet(op.InvisibleMetricMCDRebootErr) {
+			MCDRebootErr.Inc()
+		}
 		return fmt.Errorf("reboot command failed, something is seriously wrong")
 	}
 	// if we're here, reboot went through successfully, so we set rebootQueued
@@ -2146,15 +2150,18 @@ func (dn *CoreOSDaemon) applyLayeredOSChanges(mcDiff machineConfigDiff, oldConfi
 	// enablement.
 	if mcDiff.osUpdate || mcDiff.kernelType {
 		if err := dn.queueRevertRTKernel(); err != nil {
-			mcdPivotErr.Inc()
+			if !dn.invisibleMetricSet(op.InvisibleMetricMCDPivotErr) {
+				MCDPivotErr.Inc()
+			}
 			return err
 		}
 	}
-
 	// Update OS
 	if mcDiff.osUpdate {
 		if err := dn.updateLayeredOS(newConfig); err != nil {
-			mcdPivotErr.Inc()
+			if !dn.invisibleMetricSet(op.InvisibleMetricMCDPivotErr) {
+				MCDPivotErr.Inc()
+			}
 			return err
 		}
 		if dn.nodeWriter != nil {
@@ -2168,8 +2175,9 @@ func (dn *CoreOSDaemon) applyLayeredOSChanges(mcDiff machineConfigDiff, oldConfi
 	}
 
 	// if we're here, we've successfully pivoted, or pivoting wasn't necessary, so we reset the error gauge
-	mcdPivotErr.Set(0)
-
+	if !dn.invisibleMetricSet(op.InvisibleMetricMCDPivotErr) {
+		MCDPivotErr.Set(0)
+	}
 	if mcDiff.kargs {
 		if err := dn.updateKernelArguments(oldConfig.Spec.KernelArguments, newConfig.Spec.KernelArguments); err != nil {
 			return err
@@ -2211,7 +2219,9 @@ func (dn *CoreOSDaemon) applyLegacyOSChanges(mcDiff machineConfigDiff, oldConfig
 	// Update OS
 	if mcDiff.osUpdate {
 		if err := dn.updateOS(newConfig, osImageContentDir); err != nil {
-			mcdPivotErr.Inc()
+			if !dn.invisibleMetricSet(op.InvisibleMetricMCDPivotErr) {
+				MCDPivotErr.Inc()
+			}
 			return err
 		}
 		if dn.nodeWriter != nil {
@@ -2225,8 +2235,9 @@ func (dn *CoreOSDaemon) applyLegacyOSChanges(mcDiff machineConfigDiff, oldConfig
 	}
 
 	// if we're here, we've successfully pivoted, or pivoting wasn't necessary, so we reset the error gauge
-	mcdPivotErr.Set(0)
-
+	if !dn.invisibleMetricSet(op.InvisibleMetricMCDPivotErr) {
+		MCDPivotErr.Set(0)
+	}
 	defer func() {
 		// Operations performed by rpm-ostree on the booted system are available
 		// as staged deployment. It gets applied only when we reboot the system.

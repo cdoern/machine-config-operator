@@ -42,7 +42,10 @@ import (
 	mcfgclientset "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	"github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
 	mcfginformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io/v1"
+	opinformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io/v1"
 	mcfglistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/machineconfiguration.openshift.io/v1"
+	oplistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/operator.openshift.io/v1"
+
 	"github.com/openshift/machine-config-operator/pkg/version"
 )
 
@@ -101,6 +104,9 @@ type Controller struct {
 	mcpLister       mcfglistersv1.MachineConfigPoolLister
 	mcpListerSynced cache.InformerSynced
 
+	opcfgLister       oplistersv1.MachineConfigurationLister
+	opcfgListerSynced cache.InformerSynced
+
 	clusterVersionLister       cligolistersv1.ClusterVersionLister
 	clusterVersionListerSynced cache.InformerSynced
 
@@ -111,6 +117,7 @@ type Controller struct {
 // New returns a new container runtime config controller
 func New(
 	templatesDir string,
+	opInformer opinformersv1.MachineConfigurationInformer,
 	mcpInformer mcfginformersv1.MachineConfigPoolInformer,
 	ccInformer mcfginformersv1.ControllerConfigInformer,
 	mcrInformer mcfginformersv1.ContainerRuntimeConfigInformer,
@@ -169,6 +176,9 @@ func New(
 	ctrl.syncHandler = ctrl.syncContainerRuntimeConfig
 	ctrl.syncImgHandler = ctrl.syncImageConfig
 	ctrl.enqueueContainerRuntimeConfig = ctrl.enqueue
+
+	ctrl.opcfgLister = opInformer.Lister()
+	ctrl.opcfgListerSynced = opInformer.Informer().HasSynced
 
 	ctrl.mcpLister = mcpInformer.Lister()
 	ctrl.mcpListerSynced = mcpInformer.Informer().HasSynced

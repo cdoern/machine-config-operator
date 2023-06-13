@@ -10,6 +10,7 @@ import (
 	versioned "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	internalinterfaces "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/internalinterfaces"
 	machineconfigurationopenshiftio "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io"
+	operatoropenshiftio "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -228,8 +229,13 @@ type SharedInformerFactory interface {
 	InformerFor(obj runtime.Object, newFunc internalinterfaces.NewInformerFunc) cache.SharedIndexInformer
 
 	Machineconfiguration() machineconfigurationopenshiftio.Interface
+	Operator() operatoropenshiftio.Interface
 }
 
 func (f *sharedInformerFactory) Machineconfiguration() machineconfigurationopenshiftio.Interface {
 	return machineconfigurationopenshiftio.New(f, f.namespace, f.tweakListOptions)
+}
+
+func (f *sharedInformerFactory) Operator() operatoropenshiftio.Interface {
+	return operatoropenshiftio.New(f, f.namespace, f.tweakListOptions)
 }

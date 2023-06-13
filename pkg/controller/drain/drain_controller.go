@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	op "github.com/openshift/machine-config-operator/pkg/apis/operator.openshift.io/v1"
+	opinformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/operator.openshift.io/v1"
+	oplistersv1 "github.com/openshift/machine-config-operator/pkg/generated/listers/operator.openshift.io/v1"
+
 	"github.com/golang/glog"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	daemonconsts "github.com/openshift/machine-config-operator/pkg/daemon/constants"
@@ -15,6 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	kubeErrs "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -90,6 +95,9 @@ type Controller struct {
 	syncHandler func(node string) error
 	enqueueNode func(*corev1.Node)
 
+	opcfgLister       oplistersv1.MachineConfigurationLister
+	opcfgListerSynced cache.InformerSynced
+
 	nodeLister       corelisterv1.NodeLister
 	nodeListerSynced cache.InformerSynced
 
@@ -102,6 +110,7 @@ type Controller struct {
 // New returns a new node controller.
 func New(
 	cfg Config,
+	opCfgInformer opinformersv1.MachineConfigurationInformer,
 	nodeInformer coreinformersv1.NodeInformer,
 	kubeClient clientset.Interface,
 	mcfgClient mcfgclientset.Interface,
@@ -123,6 +132,8 @@ func New(
 		UpdateFunc: func(oldObj, newObj interface{}) { ctrl.handleNodeEvent(newObj) },
 	})
 
+	ctrl.opcfgLister = opCfgInformer.Lister()
+	ctrl.opcfgListerSynced = nodeInformer.Informer().HasSynced
 	ctrl.syncHandler = ctrl.syncNode
 	ctrl.enqueueNode = ctrl.enqueueDefault
 
@@ -348,7 +359,9 @@ func (ctrl *Controller) drainNode(node *corev1.Node, drainer *drain.Helper) erro
 		glog.Infof("Previous node drain found. Drain has been going on for %v hours", duration.Hours())
 		if duration > ctrl.cfg.DrainTimeoutDuration {
 			glog.Errorf("node %s: drain exceeded timeout: %v. Will continue to retry.", node.Name, ctrl.cfg.DrainTimeoutDuration)
-			ctrlcommon.MCCDrainErr.WithLabelValues(node.Name).Set(1)
+			if !ctrl.invisibleMetricSet(op.InvisibleMetricMCCDrainErr) {
+				ctrlcommon.MCCDrainErr.WithLabelValues(node.Name).Set(1)
+			}
 		}
 		break
 	}
@@ -387,8 +400,10 @@ func (ctrl *Controller) drainNode(node *corev1.Node, drainer *drain.Helper) erro
 	delete(ctrl.ongoingDrains, node.Name)
 
 	// Clear the MCCDrainErr, if any.
-	if ctrlcommon.MCCDrainErr.DeleteLabelValues(node.Name) {
-		glog.Infof("Cleaning up MCCDrain error for node(%s) as drain was completed", node.Name)
+	if !ctrl.invisibleMetricSet(op.InvisibleMetricMCCDrainErr) {
+		if ctrlcommon.MCCDrainErr.DeleteLabelValues(node.Name) {
+			glog.Infof("Cleaning up MCCDrain error for node(%s) as drain was completed", node.Name)
+		}
 	}
 
 	return nil
@@ -475,4 +490,19 @@ func (ctrl *Controller) cordonOrUncordonNode(desired bool, node *corev1.Node, dr
 	}
 
 	return nil
+}
+
+func (ctrl *Controller) invisibleMetricSet(metric op.InvisibleMetric) bool {
+	operatorConfigs, err := ctrl.opcfgLister.List(labels.Everything())
+	if err != nil {
+		return false
+	}
+	for _, cfg := range operatorConfigs {
+		for _, m := range cfg.Spec.InvisibleMetrics {
+			if metric == m {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -146,7 +146,7 @@ func (nw *clusterNodeWriter) SetDone(dcAnnotation string) error {
 		// clear out any Degraded/Unreconcilable reason
 		constants.MachineConfigDaemonReasonAnnotationKey: "",
 	}
-	UpdateStateMetric(mcdState, constants.MachineConfigDaemonStateDone, "")
+	UpdateStateMetric(MCDState, constants.MachineConfigDaemonStateDone, "")
 	respChan := make(chan response, 1)
 	nw.writer <- message{
 		annos:           annos,
@@ -161,7 +161,8 @@ func (nw *clusterNodeWriter) SetWorking() error {
 	annos := map[string]string{
 		constants.MachineConfigDaemonStateAnnotationKey: constants.MachineConfigDaemonStateWorking,
 	}
-	UpdateStateMetric(mcdState, constants.MachineConfigDaemonStateWorking, "")
+
+	UpdateStateMetric(MCDState, constants.MachineConfigDaemonStateWorking, "")
 	respChan := make(chan response, 1)
 	nw.writer <- message{
 		annos:           annos,
@@ -181,7 +182,7 @@ func (nw *clusterNodeWriter) SetUnreconcilable(err error) error {
 		constants.MachineConfigDaemonStateAnnotationKey:  constants.MachineConfigDaemonStateUnreconcilable,
 		constants.MachineConfigDaemonReasonAnnotationKey: truncatedErr,
 	}
-	UpdateStateMetric(mcdState, constants.MachineConfigDaemonStateUnreconcilable, truncatedErr)
+	UpdateStateMetric(MCDState, constants.MachineConfigDaemonStateUnreconcilable, truncatedErr)
 	respChan := make(chan response, 1)
 	nw.writer <- message{
 		annos:           annos,
@@ -205,7 +206,7 @@ func (nw *clusterNodeWriter) SetDegraded(err error) error {
 		constants.MachineConfigDaemonStateAnnotationKey:  constants.MachineConfigDaemonStateDegraded,
 		constants.MachineConfigDaemonReasonAnnotationKey: truncatedErr,
 	}
-	UpdateStateMetric(mcdState, constants.MachineConfigDaemonStateDegraded, truncatedErr)
+	UpdateStateMetric(MCDState, constants.MachineConfigDaemonStateDegraded, truncatedErr)
 	respChan := make(chan response, 1)
 	nw.writer <- message{
 		annos:           annos,
@@ -220,7 +221,7 @@ func (nw *clusterNodeWriter) SetDegraded(err error) error {
 
 // SetSSHAccessed sets the ssh annotation to accessed
 func (nw *clusterNodeWriter) SetSSHAccessed() error {
-	mcdSSHAccessed.Inc()
+	MCDSSHAccessed.Inc()
 	annos := map[string]string{
 		machineConfigDaemonSSHAccessAnnotationKey: machineConfigDaemonSSHAccessValue,
 	}

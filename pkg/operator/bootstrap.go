@@ -1,21 +1,40 @@
 package operator
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/golang/glog"
+
+	operatorv1 "github.com/openshift/api/operator/v1"
 
 	configv1 "github.com/openshift/api/config/v1"
 	configscheme "github.com/openshift/client-go/config/clientset/versioned/scheme"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
 
 	templatectrl "github.com/openshift/machine-config-operator/pkg/controller/template"
 )
+
+var (
+	operatorConfig         = "mco-operator-config.yaml"
+	operatorConfigTemplate = template.Must(template.New("operatorConfig").Parse(`apiVersion: operator.openshift.io/v1
+kind: MachineConfiguration
+metadata:
+  name: cluster
+spec:
+  invisibleMetrics: "{{ .Metrics }}"`))
+)
+
+type MetricsConfig struct {
+	Metrics []operatorv1.InvisibleMetric
+}
 
 type manifest struct {
 	name     string
@@ -57,6 +76,46 @@ func RenderBootstrap(
 		}
 		filesData[file] = data
 	}
+
+	obj, err := runtime.Decode(configscheme.Codecs.UniversalDecoder(configv1.SchemeGroupVersion), filesData[clusterConfigConfigMapFile])
+	if err != nil {
+		return err
+	}
+	m, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return nil
+	}
+
+	d, ok := m.Data["install-config"]
+	if !ok {
+		return nil
+	}
+
+	//decode, err := runtime.Decode(configscheme.Codecs.UniversalDecoder(configv1.SchemeGroupVersion), []byte(d))
+
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader([]byte(d)), 4096)
+	conf := &MetricsConfig{}
+	if err := decoder.Decode(conf); err != nil {
+		return err
+	}
+
+	var opConf bytes.Buffer
+	if err := operatorConfigTemplate.Execute(&opConf, conf); err != nil {
+		return err
+	}
+
+	assetRenderPath := filepath.Join(destinationDir, "bootstrap", "manifests", operatorConfig)
+	dirname := filepath.Dir(assetRenderPath)
+	if err := os.MkdirAll(dirname, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(assetRenderPath, opConf.Bytes(), 0o644); err != nil {
+		return err
+	}
+
+	// CCO then writes this data to: cco-operator-config.yaml
+	// I cannot find where this is referenced outside of render's scope
+	// the only way the CCO retrives the custom option is via kubeClient.get where kubeClient is a client.Client.
 
 	// create ControllerConfigSpec
 	obji, err := runtime.Decode(configscheme.Codecs.UniversalDecoder(configv1.SchemeGroupVersion), filesData[infraFile])
@@ -154,8 +213,12 @@ func RenderBootstrap(
 	}
 
 	config := getRenderConfig("", string(filesData[kubeAPIServerServingCA]), spec, &imgs.RenderConfigImages, infra.Status.APIServerInternalURL, nil)
-
+	config.Metrics = conf
 	manifests := []manifest{
+		{
+			name:     "manifests/operator-config.yaml",
+			filename: filepath.Join("bootstrap", "manifests", operatorConfig),
+		},
 		{
 			name:     "manifests/machineconfigcontroller/controllerconfig.yaml",
 			filename: "bootstrap/manifests/machineconfigcontroller-controllerconfig.yaml",

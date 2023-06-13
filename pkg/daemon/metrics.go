@@ -10,49 +10,49 @@ import (
 // MCD Metrics
 var (
 	// hostOS shows os that MCD is running on and version if RHCOS
-	hostOS = prometheus.NewGaugeVec(
+	HostOS = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "mcd_host_os_and_version",
 			Help: "os that MCD is running on and version if RHCOS",
 		}, []string{"os", "version"})
 
 	// mcdSSHAccessed shows ssh access count for a node
-	mcdSSHAccessed = prometheus.NewCounter(
+	MCDSSHAccessed = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "ssh_accesses_total",
 			Help: "Total number of SSH access occurred.",
 		})
 
 	// mcdPivotErr flags error encountered during pivot
-	mcdPivotErr = prometheus.NewGauge(
+	MCDPivotErr = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "mcd_pivot_errors_total",
 			Help: "Total number of errors encountered during pivot.",
 		})
 
 	// mcdState is state of mcd for indicated node (ex: degraded)
-	mcdState = prometheus.NewGaugeVec(
+	MCDState = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "mcd_state",
 			Help: "state of daemon on specified node",
 		}, []string{"state", "reason"})
 
 	// kubeletHealthState logs kubelet health failures and tallys count
-	kubeletHealthState = prometheus.NewGauge(
+	KubeletHealthState = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "mcd_kubelet_state",
 			Help: "state of kubelet health monitor",
 		})
 
 	// mcdRebootErr tallys failed reboot attempts
-	mcdRebootErr = prometheus.NewCounter(
+	MCDRebootErr = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "mcd_reboots_failed_total",
 			Help: "Total number of reboots that failed.",
 		})
 
 	// mcdUpdateState logs completed update or error
-	mcdUpdateState = prometheus.NewGaugeVec(
+	MCDUpdateState = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "mcd_update_state",
 			Help: "completed update config or error",
@@ -65,26 +65,31 @@ var (
 // We are using these metrics as a node state logger, so it is undesirable
 // to have multiple metrics of the same kind when the state changes.
 func UpdateStateMetric(metric *prometheus.GaugeVec, labels ...string) {
+
+	// somehow need to let this function know if there is no metric
+	// either need to add the metric per controller
+	// or need to use use the operator crd
+	// probably a better option
 	metric.Reset()
 	metric.WithLabelValues(labels...).SetToCurrentTime()
 }
 
 func RegisterMCDMetrics() error {
 	err := ctrlcommon.RegisterMetrics([]prometheus.Collector{
-		hostOS,
-		mcdSSHAccessed,
-		mcdPivotErr,
-		mcdState,
-		kubeletHealthState,
-		mcdRebootErr,
-		mcdUpdateState,
+		HostOS,
+		MCDSSHAccessed,
+		MCDPivotErr,
+		MCDState,
+		KubeletHealthState,
+		MCDRebootErr,
+		MCDUpdateState,
 	})
 
 	if err != nil {
 		return fmt.Errorf("could not register machine-config-daemon metrics: %w", err)
 	}
 
-	kubeletHealthState.Set(0)
+	KubeletHealthState.Set(0)
 
 	return nil
 }
