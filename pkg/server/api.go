@@ -103,6 +103,8 @@ func (sh *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// need to recieve the proper pool
+
 	poolName := path.Base(r.URL.Path)
 	useragent := r.Header.Get("User-Agent")
 	acceptHeader := r.Header.Get("Accept")

@@ -896,6 +896,8 @@ func (dn *Daemon) RunOnceFrom(onceFrom string, skipReboot bool) error {
 
 // RunFirstbootCompleteMachineconfig is run via systemd on the first boot
 // to complete processing of the target MachineConfig.
+
+// on firstboot we need to dilineate what goes where
 func (dn *Daemon) RunFirstbootCompleteMachineconfig() error {
 	data, err := os.ReadFile(constants.MachineConfigEncapsulatedPath)
 	if err != nil {
@@ -953,6 +955,7 @@ func (dn *Daemon) RunFirstbootCompleteMachineconfig() error {
 		return nil
 	}
 
+	// if this MC has the customPool annotation in it, maybe we do not update?
 	dn.skipReboot = true
 	err = dn.update(nil, &mc)
 	if err != nil {
@@ -1500,16 +1503,27 @@ func removeIgnitionArtifacts() error {
 //
 //nolint:gocyclo
 func (dn *Daemon) checkStateOnFirstRun() error {
-	node, err := dn.loadNodeAnnotations(dn.node)
+
+	halt := false
+	// loading node anno's might be a good spot
+	node, pool, err := dn.loadNodeAnnotations(dn.node)
 	if err != nil {
 		return err
 	}
+	if pool != nil {
+		halt = true
+	}
+
 	// Update our cached copy
 	dn.node = node
 
 	pendingState, err := dn.getPendingState()
 	if err != nil {
 		return err
+	}
+	// might not be necessary
+	if halt {
+		pendingState = nil
 	}
 	var pendingConfigName, bootID string
 	if pendingState != nil {
@@ -1537,7 +1551,10 @@ func (dn *Daemon) checkStateOnFirstRun() error {
 	// if we have a pendingConfig but we're into the same bootid, we failed to drain or reboot
 	// and if we still have a pendingConfig it means we've been killed by kube after 600s
 	// take a stab at that and re-run the drain+reboot routine
-	if state.pendingConfig != nil && bootID == dn.bootID {
+	if state.pendingConfig != nil && bootID == dn.bootID && !halt {
+
+		// we do not want to reboot here
+
 		dn.logSystem("drain interrupted, retrying")
 		if err := dn.performDrain(); err != nil {
 			return err
@@ -1557,7 +1574,7 @@ func (dn *Daemon) checkStateOnFirstRun() error {
 	}
 
 	// Bootstrapping state is when we have the node annotations file
-	if state.bootstrapping {
+	if state.bootstrapping && !halt {
 		targetOSImageURL := state.currentConfig.Spec.OSImageURL
 		osMatch := dn.checkOS(targetOSImageURL)
 		if !osMatch {
@@ -1664,7 +1681,10 @@ func (dn *Daemon) checkStateOnFirstRun() error {
 	}
 	// currentConfig != desiredConfig, and we're not booting up into the desiredConfig.
 	// Kick off an update.
-	return dn.triggerUpdateWithMachineConfig(state.currentConfig, state.desiredConfig)
+	if !halt {
+		return dn.triggerUpdateWithMachineConfig(state.currentConfig, state.desiredConfig)
+	}
+	return nil
 }
 
 // updateConfigAndState updates node to desired state, labels nodes as done and uncordon

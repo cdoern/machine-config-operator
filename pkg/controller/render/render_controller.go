@@ -614,6 +614,7 @@ func RunBootstrap(pools []*mcfgv1.MachineConfigPool, configs []*mcfgv1.MachineCo
 		oconfigs []*mcfgv1.MachineConfig
 	)
 	for _, pool := range pools {
+		// this should trigger for worker and custom so we will have two MCs???
 		pcs, err := getMachineConfigsForPool(pool, configs)
 		if err != nil {
 			return nil, nil, err

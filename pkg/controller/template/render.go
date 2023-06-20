@@ -87,10 +87,14 @@ func generateTemplateMachineConfigs(config *RenderConfig, templateDir string) ([
 	return cfgs, nil
 }
 
+// hm2?
 // GenerateMachineConfigsForRole creates MachineConfigs for the role provided
 func GenerateMachineConfigsForRole(config *RenderConfig, role, templateDir string) ([]*mcfgv1.MachineConfig, error) {
 	rolePath := role
 	//nolint:goconst
+
+	// This is part of issue, we want to be able to set a role that is non worker.
+	// this calls generatemachineconfigforname
 	if role != "worker" && role != "master" {
 		// custom pools are only allowed to be worker's children
 		// and can reuse the worker templates
@@ -196,6 +200,8 @@ func filterTemplates(toFilter map[string]string, path string, config *RenderConf
 	return filepath.Walk(path, walkFn)
 }
 
+// hm?
+// This calls machineconfigfromignconfig using the modified role
 func generateMachineConfigForName(config *RenderConfig, role, name, templateDir, path string, commonAdded *bool) (*mcfgv1.MachineConfig, error) {
 	platformString, err := platformStringFromControllerConfigSpec(config.ControllerConfigSpec)
 	if err != nil {

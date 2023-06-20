@@ -8,6 +8,7 @@ const (
 	//
 	// XXX
 
+	DropIntoCustomPoolAnnotationKey = "machineconfiguration.openshift.io/customPool"
 	// CurrentMachineConfigAnnotationKey is used to fetch current MachineConfig for a machine
 	CurrentMachineConfigAnnotationKey = "machineconfiguration.openshift.io/currentConfig"
 	// DesiredMachineConfigAnnotationKey is used to specify the desired MachineConfig for a machine

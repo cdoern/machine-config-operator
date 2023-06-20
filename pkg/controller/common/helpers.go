@@ -774,6 +774,9 @@ func TranspileCoreOSConfigToIgn(files, units []string) (*ign3types.Config, error
 	return &outConfig, nil
 }
 
+// machineconfig from ign might be where we plug into server
+// this is called by many controllers namely, render controller with a hardcoded master or worker role
+
 // MachineConfigFromIgnConfig creates a MachineConfig with the provided Ignition config
 func MachineConfigFromIgnConfig(role, name string, ignCfg interface{}) (*mcfgv1.MachineConfig, error) {
 	rawIgnCfg, err := json.Marshal(ignCfg)

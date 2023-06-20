@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	ign3types "github.com/coreos/ignition/v2/config/v3_2/types"
@@ -280,6 +281,7 @@ func (ctrl *Controller) makeMasterNodeUnSchedulable(node *corev1.Node) error {
 func (ctrl *Controller) makeMasterNodeSchedulable(node *corev1.Node) error {
 	_, err := internal.UpdateNodeRetry(ctrl.kubeClient.CoreV1().Nodes(), ctrl.nodeLister, node.Name, func(node *corev1.Node) {
 		// Add worker label
+		// LABELS
 		newLabels := node.Labels
 		if _, hasWorkerLabel := newLabels[WorkerLabel]; !hasWorkerLabel {
 			newLabels[WorkerLabel] = ""
@@ -572,6 +574,8 @@ func (ctrl *Controller) deleteNode(obj interface{}) {
 	}
 }
 
+// the pool we choose needs to change. This seems to be the universal logic for placing nodes
+
 // getPoolsForNode chooses the MachineConfigPools that should be used for a given node.
 // It disambiguates in the case where e.g. a node has both master/worker roles applied,
 // and where a custom role may be used. It returns a slice of all the pools the node belongs to.
@@ -620,9 +624,34 @@ func (ctrl *Controller) getPoolsForNode(node *corev1.Node) ([]*mcfgv1.MachineCon
 		}
 	}
 
+	// check for custom role, remove it but add the name of the MCP to the list.
+	var role string
+	for _, lbl := range node.Labels {
+		if strings.Contains(lbl, "node-role") {
+			roles := strings.Split(lbl, "/")
+			role = roles[1]
+			if role != "master" && role != "worker" {
+				newLabels := node.Labels
+				delete(newLabels, lbl)
+				node.Labels = newLabels // unlabel node?
+				custom[0].Name = role
+			}
+		}
+	}
+	//nodeList, err := ctrl.nodeLister.List(labels.SelectorFromSet(labels.Set{ctrlcommon.CustomLabel: ""}))
+
+	// if we have the boot into custom pool label, return nil for now
+	// this only happens if we also have the worker label
+
 	if len(custom) > 1 {
 		return nil, fmt.Errorf("node %s belongs to %d custom roles, cannot proceed with this Node", node.Name, len(custom))
 	} else if len(custom) == 1 {
+		if master != nil {
+			return nil, fmt.Errorf("node %s has both master role and custom role %s", node.Name, custom[0].Name)
+		}
+		pls := []*mcfgv1.MachineConfigPool{custom[0]}
+		return pls, nil
+		/*else if len(custom) == 1 {
 		// We don't support making custom pools for masters
 		if master != nil {
 			return nil, fmt.Errorf("node %s has both master role and custom role %s", node.Name, custom[0].Name)
@@ -632,7 +661,7 @@ func (ctrl *Controller) getPoolsForNode(node *corev1.Node) ([]*mcfgv1.MachineCon
 		if worker != nil {
 			pls = append(pls, worker)
 		}
-		return pls, nil
+		return pls, nil */
 	} else if master != nil {
 		// In the case where a node is both master/worker, have it live under
 		// the master pool. This occurs in CodeReadyContainers and general
@@ -642,6 +671,7 @@ func (ctrl *Controller) getPoolsForNode(node *corev1.Node) ([]*mcfgv1.MachineCon
 	}
 	// Otherwise, it's a worker with no custom roles.
 	return []*mcfgv1.MachineConfigPool{worker}, nil
+
 }
 
 // getPrimaryPoolForNode uses getPoolsForNode and returns the first one which is the one the node targets
@@ -865,6 +895,7 @@ func checkIfNodeHasInProgressTaint(node *corev1.Node) bool {
 	return false
 }
 
+// maybe this is where we need to modify some stuff, in here, we need to look at the annotation again and make sure we fall into right pool
 func (ctrl *Controller) getNodesForPool(pool *mcfgv1.MachineConfigPool) ([]*corev1.Node, error) {
 	selector, err := metav1.LabelSelectorAsSelector(pool.Spec.NodeSelector)
 	if err != nil {

@@ -605,6 +605,7 @@ func (dn *Daemon) update(oldConfig, newConfig *mcfgv1.MachineConfig) (retErr err
 		return err
 	}
 
+	// this looks at init annotations, maybe mimic this behavior
 	return dn.performPostConfigChangeAction(actions, newConfig.GetName())
 }
 

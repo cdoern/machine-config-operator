@@ -22,6 +22,8 @@ const (
 	// KernelTypeRealtime denominates the realtime kernel type
 	KernelTypeRealtime = "realtime"
 
+	CustomLabel = "node-role.kubernetes.io/custom"
+
 	// MasterLabel defines the label associated with master node. The master taint uses the same label as taint's key
 	MasterLabel = "node-role.kubernetes.io/master"
 
@@ -41,4 +43,6 @@ const (
 	MachineConfigPoolMaster = "master"
 	// MachineConfigPoolWorker is the MachineConfigPool name given to the worker
 	MachineConfigPoolWorker = "worker"
+	// custon
+	MachineConfigPoolCustom = "custom"
 )

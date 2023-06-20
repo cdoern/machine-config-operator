@@ -111,6 +111,7 @@ func (b *Bootstrap) Run(destDir string) error {
 				return fmt.Errorf("error parsing %q [%d] manifest: %w", file.Name(), idx+1, err)
 			}
 
+			// looking over manifest types
 			switch obj := obji.(type) {
 			case *mcfgv1.MachineConfigPool:
 				pools = append(pools, obj)
@@ -147,6 +148,8 @@ func (b *Bootstrap) Run(destDir string) error {
 	if cconfig == nil {
 		return fmt.Errorf("error: no controllerconfig found in dir: %q", destDir)
 	}
+
+	// this funnels down into our other functions we are looking at
 	iconfigs, err := template.RunBootstrap(b.templatesDir, cconfig, psraw, featureGate)
 	if err != nil {
 		return err
@@ -198,6 +201,7 @@ func (b *Bootstrap) Run(destDir string) error {
 		configs = append(configs, kconfigs...)
 	}
 
+	// this is where we pass all checked out MCs
 	fpools, gconfigs, err := render.RunBootstrap(pools, configs, cconfig)
 	if err != nil {
 		return err
