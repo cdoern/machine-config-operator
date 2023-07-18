@@ -21,6 +21,7 @@ import (
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
+	"github.com/openshift/machine-config-operator/pkg/controller/state"
 )
 
 // syncVersion handles reporting the version to the clusteroperator
@@ -300,12 +301,22 @@ func (optr *Operator) syncUpgradeableStatus() error {
 	}
 
 	var updating, degraded bool
+	// need to determine if upgrading now equals ONLY MCPUpgradeInProgress, or if we just want state controller to supplement this understanding
 	for _, pool := range pools {
 		// collect updating status but continue to check each pool to see if any pool is degraded
-		if isPoolStatusConditionTrue(pool, mcfgv1.MachineConfigPoolUpdating) {
+		updating, err = state.IsUpgradingProgressionTrue(mcfgv1.MachineConfigPoolUpdateInProgress, *pool, optr.msLister)
+		/*if isPoolStatusConditionTrue(pool, mcfgv1.MachineConfigPoolUpdating) {
 			updating = true
+		}*/
+		if err != nil {
+			return err
 		}
-		degraded = isPoolStatusConditionTrue(pool, mcfgv1.MachineConfigPoolDegraded)
+
+		degraded, err = state.IsUpgradingProgressionTrue(mcfgv1.MachineConfigPoolUpdateErrored, *pool, optr.msLister)
+		if err != nil {
+			return err
+		}
+		//	degraded = isPoolStatusConditionTrue(pool, mcfgv1.MachineConfigPoolDegraded)
 		// degraded should get top billing in the clusteroperator status, if we find this, set it and update
 		if degraded {
 			coStatus.Status = configv1.ConditionFalse

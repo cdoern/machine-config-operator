@@ -93,6 +93,7 @@ func runStartCmd(_ *cobra.Command, _ []string) {
 			ctrlctx.KubeInformerFactory.Core().V1().Nodes(),
 			ctrlctx.KubeMAOSharedInformer.Core().V1().Secrets(),
 			ctrlctx.ConfigInformerFactory.Config().V1().Images(),
+			ctrlctx.NamespacedInformerFactory.Machineconfiguration().V1().MachineStates(),
 		)
 
 		ctrlctx.NamespacedInformerFactory.Start(ctrlctx.Stop)

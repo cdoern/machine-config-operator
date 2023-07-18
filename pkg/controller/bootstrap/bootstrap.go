@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,10 +23,12 @@ import (
 	apioperatorsv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	containerruntimeconfig "github.com/openshift/machine-config-operator/pkg/controller/container-runtime-config"
 	kubeletconfig "github.com/openshift/machine-config-operator/pkg/controller/kubelet-config"
 	"github.com/openshift/machine-config-operator/pkg/controller/render"
+	"github.com/openshift/machine-config-operator/pkg/controller/state"
 	"github.com/openshift/machine-config-operator/pkg/controller/template"
 	"github.com/openshift/machine-config-operator/pkg/version"
 )
@@ -38,14 +41,22 @@ type Bootstrap struct {
 	manifestDir string
 	// pull secret file
 	pullSecretFile string
+	// bootstrap Health Controller
+	StateController state.StateController
 }
 
+// we Might need to make a special new path for bootstrap. No we dont, that is what the subcontroller is for
 // New returns controller for bootstrap
 func New(templatesDir, manifestDir, pullSecretFile string) *Bootstrap {
 	return &Bootstrap{
 		templatesDir:   templatesDir,
 		manifestDir:    manifestDir,
 		pullSecretFile: pullSecretFile,
+		StateController: state.New(nil, nil, state.StateControllerConfig{
+			SubControllers: []v1.StateSubController{
+				v1.StateSubControllerBootstrap,
+			},
+		}, nil, nil),
 	}
 }
 
@@ -53,6 +64,10 @@ func New(templatesDir, manifestDir, pullSecretFile string) *Bootstrap {
 // It writes all the assets to destDir
 // nolint:gocyclo
 func (b *Bootstrap) Run(destDir string) error {
+
+	ctx, _ := context.WithCancel(context.Background())
+	b.StateController.Run(2, ctx.Done())
+
 	infos, err := ctrlcommon.ReadDir(b.manifestDir)
 	if err != nil {
 		return err

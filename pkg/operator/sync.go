@@ -537,6 +537,7 @@ func (optr *Operator) syncCustomResourceDefinitions() error {
 	return nil
 }
 
+// we need to mimic this
 func (optr *Operator) syncMachineConfigPools(config *renderConfig) error {
 	mcps := []string{
 		"manifests/master.machineconfigpool.yaml",
@@ -588,6 +589,30 @@ func (optr *Operator) syncMachineConfigPools(config *renderConfig) error {
 		}
 	}
 
+	return nil
+}
+
+// we need to mimic this
+func (optr *Operator) syncMachineStates(config *renderConfig) error {
+	msc := []string{
+		"manifests/bootstrap.machinestate.yaml",
+		"manifests/mcc.machinestate.yaml",
+		"manifests/mcd.machinestate.yaml",
+		"manifests/operator.machinestate.yaml",
+		"manifests/upgrade.machinestate.yaml",
+	}
+
+	for _, ms := range msc {
+		mcpBytes, err := renderAsset(config, ms)
+		if err != nil {
+			return err
+		}
+		p := mcoResourceRead.ReadMachineStateV1OrDie(mcpBytes)
+		_, _, err = mcoResourceApply.ApplyMachineState(optr.client.MachineconfigurationV1(), p)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -698,6 +723,7 @@ func (optr *Operator) safetySyncControllerConfig(config *renderConfig) error {
 // the operator version and controller version match. We can call it from safetySyncControllerConfig
 // because safetySyncControllerConfig ensures that the operator and controller versions match before it syncs.
 func (optr *Operator) syncControllerConfig(config *renderConfig) error {
+	// important
 	ccBytes, err := renderAsset(config, "manifests/machineconfigcontroller/controllerconfig.yaml")
 	if err != nil {
 		return err

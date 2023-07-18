@@ -58,6 +58,13 @@ import (
 // Gates whether or not the MCO uses the new format base OS container image by default
 var UseNewFormatImageByDefault = true
 
+/*
+func SetPoolHealthProgression(pool mcfgv1.MachineConfigPool, phase v1.MachineConfigPoolProgression, subPhase string, reason string) error {
+	pool.Status.PoolHealthProgression[phase] = v1.MachineConfigPoolHealthCondition{Phase: subPhase, Reason: reason}
+	return nil
+}
+*/
+
 // strToPtr converts the input string to a pointer to itself
 func strToPtr(s string) *string {
 	return &s

@@ -118,6 +118,8 @@ func (dn *Daemon) performPostConfigChangeAction(postConfigChangeActions []string
 		return nil
 	}
 
+	// this is what triggers an update, maybe "updatestarted" here?
+
 	// currentConfig != desiredConfig, kick off an update
 	return dn.triggerUpdateWithMachineConfig(state.currentConfig, state.desiredConfig, true)
 }
@@ -370,6 +372,8 @@ func calculatePostConfigChangeAction(diff *machineConfigDiff, diffFileSet []stri
 	return calculatePostConfigChangeActionFromFileDiffs(diffFileSet), nil
 }
 
+// will things that happen in here get picked up by the controller fast enough? or do we need to somehow look
+// at the nodes while they're updating?????
 // update the node to the provided node configuration.
 //
 //nolint:gocyclo
@@ -411,6 +415,9 @@ func (dn *Daemon) update(oldConfig, newConfig *mcfgv1.MachineConfig, skipCertifi
 
 	// make sure we can actually reconcile this state
 	diff, reconcilableError := reconcilable(oldConfig, newConfig)
+
+	// we need to have stop gaps. No one is going to look at these logs
+	// for when things go right. Only when they go wrong
 
 	if reconcilableError != nil {
 		wrappedErr := fmt.Errorf("can't reconcile config %s with %s: %w", oldConfigName, newConfigName, reconcilableError)

@@ -8,6 +8,13 @@ import (
 
 // EnsureMachineConfig ensures that the existing matches the required.
 // modified is set to true when existing had to be updated with required.
+func EnsureMachineState(modified *bool, existing *mcfgv1.MachineState, required mcfgv1.MachineState) {
+	resourcemerge.EnsureObjectMeta(modified, &existing.ObjectMeta, required.ObjectMeta)
+	ensureMachineStateSpec(modified, &existing.Spec, required.Spec)
+}
+
+// EnsureMachineConfig ensures that the existing matches the required.
+// modified is set to true when existing had to be updated with required.
 func EnsureMachineConfig(modified *bool, existing *mcfgv1.MachineConfig, required mcfgv1.MachineConfig) {
 	resourcemerge.EnsureObjectMeta(modified, &existing.ObjectMeta, required.ObjectMeta)
 	ensureMachineConfigSpec(modified, &existing.Spec, required.Spec)
@@ -44,6 +51,12 @@ func EnsureMachineConfigPool(modified *bool, existing *mcfgv1.MachineConfigPool,
 	}
 }
 
+func ensureMachineStateSpec(modified *bool, existing *mcfgv1.MachineStateSpec, required mcfgv1.MachineStateSpec) {
+	if !equality.Semantic.DeepEqual(existing.Config, required.Config) {
+		*modified = true
+		(*existing).Config = required.Config
+	}
+}
 func ensureMachineConfigSpec(modified *bool, existing *mcfgv1.MachineConfigSpec, required mcfgv1.MachineConfigSpec) {
 	resourcemerge.SetStringIfSet(modified, &existing.OSImageURL, required.OSImageURL)
 	resourcemerge.SetStringIfSet(modified, &existing.KernelType, required.KernelType)

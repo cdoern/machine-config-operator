@@ -1,0 +1,7 @@
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineState
+metadata:
+  name: mcc
+  labels:
+    "states.operator.machineconfiguration.openshift.io/mcc": ""
+spec:

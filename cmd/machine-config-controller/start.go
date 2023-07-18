@@ -10,12 +10,14 @@ import (
 	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"github.com/openshift/machine-config-operator/cmd/common"
 	"github.com/openshift/machine-config-operator/internal/clients"
+	v1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	containerruntimeconfig "github.com/openshift/machine-config-operator/pkg/controller/container-runtime-config"
 	"github.com/openshift/machine-config-operator/pkg/controller/drain"
 	kubeletconfig "github.com/openshift/machine-config-operator/pkg/controller/kubelet-config"
 	"github.com/openshift/machine-config-operator/pkg/controller/node"
 	"github.com/openshift/machine-config-operator/pkg/controller/render"
+	"github.com/openshift/machine-config-operator/pkg/controller/state"
 	"github.com/openshift/machine-config-operator/pkg/controller/template"
 	"github.com/openshift/machine-config-operator/pkg/version"
 	"github.com/spf13/cobra"
@@ -37,11 +39,13 @@ var (
 		templates                string
 		promMetricsListenAddress string
 		resourceLockNamespace    string
+		StateSubControllers      []string
 	}
 )
 
 func init() {
 	rootCmd.AddCommand(startCmd)
+	startCmd.PersistentFlags().StringArrayVar(&startOpts.StateSubControllers, "state-controllers", []string{"poolHealthController", "bootstrapHealthController"}, "enable/disable the different health controllers")
 	startCmd.PersistentFlags().StringVar(&startOpts.kubeconfig, "kubeconfig", "", "Kubeconfig file to access a remote cluster (testing only)")
 	startCmd.PersistentFlags().StringVar(&startOpts.resourceLockNamespace, "resourcelock-namespace", metav1.NamespaceSystem, "Path to the template files used for creating MachineConfig objects")
 	startCmd.PersistentFlags().StringVar(&startOpts.promMetricsListenAddress, "metrics-listen-address", "127.0.0.1:8797", "Listen address for prometheus metrics listener")
@@ -132,7 +136,10 @@ func runStartCmd(_ *cobra.Command, _ []string) {
 
 func createControllers(ctx *ctrlcommon.ControllerContext) []ctrlcommon.Controller {
 	var controllers []ctrlcommon.Controller
-
+	statesubcontrollers := []v1.StateSubController{}
+	for _, sub := range startOpts.StateSubControllers {
+		statesubcontrollers = append(statesubcontrollers, v1.StateSubController(sub))
+	}
 	controllers = append(controllers,
 		// Our primary MCs come from here
 		template.New(
@@ -192,6 +199,15 @@ func createControllers(ctx *ctrlcommon.ControllerContext) []ctrlcommon.Controlle
 			ctx.ConfigInformerFactory.Config().V1().Schedulers(),
 			ctx.ClientBuilder.KubeClientOrDie("node-update-controller"),
 			ctx.ClientBuilder.MachineConfigClientOrDie("node-update-controller"),
+		),
+		state.New(
+			ctx.InformerFactory.Machineconfiguration().V1().MachineConfigPools(),
+			ctx.InformerFactory.Machineconfiguration().V1().MachineStates(),
+			state.StateControllerConfig{
+				SubControllers: statesubcontrollers,
+			},
+			ctx.ClientBuilder.KubeClientOrDie("machine-state-controller"),
+			ctx.ClientBuilder.MachineConfigClientOrDie("machine-state-controller"),
 		),
 	)
 

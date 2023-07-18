@@ -75,6 +75,7 @@ type Operator struct {
 	imgLister        configlistersv1.ImageLister
 	crdLister        apiextlistersv1.CustomResourceDefinitionLister
 	mcpLister        mcfglistersv1.MachineConfigPoolLister
+	msLister         mcfglistersv1.MachineStateLister
 	ccLister         mcfglistersv1.ControllerConfigLister
 	mcLister         mcfglistersv1.MachineConfigLister
 	deployLister     appslisterv1.DeploymentLister
@@ -107,6 +108,7 @@ type Operator struct {
 	dnsListerSynced                  cache.InformerSynced
 	maoSecretInformerSynced          cache.InformerSynced
 	imgListerSynced                  cache.InformerSynced
+	msListerSynced                   cache.InformerSynced
 
 	// queue only ever has one item, but it has nice error handling backoff/retry semantics
 	queue workqueue.RateLimitingInterface
@@ -142,6 +144,7 @@ func New(
 	nodeInformer coreinformersv1.NodeInformer,
 	maoSecretInformer coreinformersv1.SecretInformer,
 	imgInformer configinformersv1.ImageInformer,
+	msInformer mcfginformersv1.MachineStateInformer,
 ) *Operator {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
@@ -184,12 +187,14 @@ func New(
 		nodeInformer.Informer(),
 		dnsInformer.Informer(),
 		maoSecretInformer.Informer(),
+		msInformer.Informer(),
 	} {
 		i.AddEventHandler(optr.eventHandler())
 	}
 
 	optr.syncHandler = optr.sync
 
+	optr.msLister = msInformer.Lister()
 	optr.imgLister = imgInformer.Lister()
 	optr.clusterCmLister = clusterCmInfomer.Lister()
 	optr.clusterCmListerSynced = clusterCmInfomer.Informer().HasSynced
@@ -206,6 +211,7 @@ func New(
 	optr.nodeLister = nodeInformer.Lister()
 	optr.nodeListerSynced = nodeInformer.Informer().HasSynced
 
+	optr.msListerSynced = msInformer.Informer().HasSynced
 	optr.imgListerSynced = imgInformer.Informer().HasSynced
 	optr.maoSecretInformerSynced = maoSecretInformer.Informer().HasSynced
 	optr.serviceAccountInformerSynced = serviceAccountInfomer.Informer().HasSynced
@@ -370,6 +376,8 @@ func (optr *Operator) sync(key string) error {
 		{"MachineConfigServer", optr.syncMachineConfigServer},
 		// this check must always run last since it makes sure the pools are in sync/upgrading correctly
 		{"RequiredPools", optr.syncRequiredMachineConfigPools},
+		// needs to be last to ensure we have all updates.
+		{"MachineState", optr.syncMachineStates},
 	}
 	return optr.syncAll(syncFuncs)
 }

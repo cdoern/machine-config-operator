@@ -27,16 +27,22 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformersv1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	corev1lister "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 
 	configv1 "github.com/openshift/api/config/v1"
 	mcoResourceRead "github.com/openshift/machine-config-operator/lib/resourceread"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
+	"github.com/openshift/machine-config-operator/pkg/controller/state"
 	"github.com/openshift/machine-config-operator/pkg/daemon/constants"
 	"github.com/openshift/machine-config-operator/pkg/daemon/osrelease"
 	mcfginformersv1 "github.com/openshift/machine-config-operator/pkg/generated/informers/externalversions/machineconfiguration.openshift.io/v1"
@@ -78,6 +84,9 @@ type Daemon struct {
 	// nodeLister is used to watch for updates via the informer
 	nodeLister       corev1lister.NodeLister
 	nodeListerSynced cache.InformerSynced
+
+	mcpLister       mcfglistersv1.MachineConfigPoolLister
+	mcpListerSynced cache.InformerSynced
 
 	mcLister       mcfglistersv1.MachineConfigLister
 	mcListerSynced cache.InformerSynced
@@ -130,6 +139,11 @@ type Daemon struct {
 
 	// Used for Hypershift
 	hypershiftConfigMap string
+
+	// deaemonHealthEvents lists all health related events
+	daemonHealthEvents record.EventRecorder
+
+	healthPod corev1.Pod
 }
 
 // CoreOSDaemon protects the methods that should only be called on CoreOS variants
@@ -272,6 +286,21 @@ func New(
 	// report OS & version (if RHCOS or FCOS) to prometheus
 	hostOS.WithLabelValues(hostos.ToPrometheusLabel(), osVersion).Set(1)
 
+	config, err := clientcmd.BuildConfigFromFlags("", nodeWriterKubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+	kubeClient, err := kubernetes.NewForConfig(rest.AddUserAgent(config, "machine-config-daemon"))
+	if err != nil {
+		return nil, err
+	}
+
+	klog.Infof("NodeWriter initialized with credentials from %s", nodeWriterKubeconfigPath)
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(klog.V(2).Infof)
+	eventBroadcaster.StartRecordingToSink(&corev1client.EventSinkImpl{Interface: kubeClient.CoreV1().Events("openshift-machine-config-operator")})
+
 	return &Daemon{
 		mock:               mock,
 		booting:            true,
@@ -281,6 +310,7 @@ func New(
 		bootedOSImageURL:   osImageURL,
 		bootedOSCommit:     osCommit,
 		bootID:             bootID,
+		daemonHealthEvents: eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "mcd-health"}),
 		exitCh:             exitCh,
 		currentConfigPath:  currentConfigPath,
 		configDriftMonitor: NewConfigDriftMonitor(),
@@ -292,6 +322,7 @@ func New(
 func (dn *Daemon) ClusterConnect(
 	name string,
 	kubeClient kubernetes.Interface,
+	mcpInformer mcfginformersv1.MachineConfigPoolInformer,
 	mcInformer mcfginformersv1.MachineConfigInformer,
 	nodeInformer coreinformersv1.NodeInformer,
 	ccInformer mcfginformersv1.ControllerConfigInformer,
@@ -312,6 +343,8 @@ func (dn *Daemon) ClusterConnect(
 		AddFunc:    dn.handleNodeEvent,
 		UpdateFunc: func(oldObj, newObj interface{}) { dn.handleNodeEvent(newObj) },
 	})
+	dn.mcpLister = mcpInformer.Lister()
+	dn.mcpListerSynced = mcpInformer.Informer().HasSynced
 	dn.nodeLister = nodeInformer.Lister()
 	dn.nodeListerSynced = nodeInformer.Informer().HasSynced
 	dn.mcLister = mcInformer.Lister()
@@ -600,6 +633,9 @@ func (dn *Daemon) initializeNode() error {
 }
 
 func (dn *Daemon) syncNode(key string) error {
+
+	// how to communicate with the healthcontroller
+	// datatypes? but I'd like to make it uniform. a config of some sort? that everyone can update a version?
 	startTime := time.Now()
 	klog.V(4).Infof("Started syncing node %q (%v)", key, startTime)
 	defer func() {
@@ -639,6 +675,24 @@ func (dn *Daemon) syncNode(key string) error {
 
 	// Deep-copy otherwise we are mutating our cache.
 	node = node.DeepCopy()
+	// this is going to be weird
+	// events need to be done on an object
+
+	healthPod, err := state.StateControllerForNode(dn.kubeClient, *node)
+	if err != nil {
+		return err
+	}
+
+	if healthPod != nil {
+		dn.healthPod = *healthPod
+	}
+
+	annos := make(map[string]string)
+	annos["node"] = node.Name
+	annos["ms"] = "DaemonState" //might need this might not
+
+	dn.daemonHealthEvents.AnnotatedEventf(&dn.healthPod, annos, corev1.EventTypeNormal, "GotNode", "Got node %s for MCD", node.Name)
+	//	dn.daemonHealthEvents.Eventf(
 	if dn.node == nil {
 		dn.node = node
 		if err := dn.initializeNode(); err != nil {
@@ -651,12 +705,17 @@ func (dn *Daemon) syncNode(key string) error {
 		oldReason := dn.node.Annotations[constants.MachineConfigDaemonReasonAnnotationKey]
 		newReason := node.Annotations[constants.MachineConfigDaemonReasonAnnotationKey]
 		if oldState != newState {
-			klog.Infof("Transitioned from state: %v -> %v", oldState, newState)
+
+			dn.daemonHealthEvents.AnnotatedEventf(&dn.healthPod, annos, corev1.EventTypeNormal, "UpdatingStateAnnotations", "Updating MCO State from %s to %s", oldState, newState)
 		}
 		if oldReason != newReason {
-			klog.Infof("Transitioned from degraded/unreconcilable reason %v -> %v", oldReason, newReason)
+
+			dn.daemonHealthEvents.AnnotatedEventf(&dn.healthPod, annos, corev1.EventTypeNormal, "UpdatingReasonAnnotations", "Updating MCO State Transition Reasons from %s to %s", oldReason, newReason)
+
 		}
 		dn.node = node
+		// this is going to be weird
+		// events need to be done on an object
 	}
 
 	// Take care of the very first sync of the MCD on a node.
@@ -664,6 +723,7 @@ func (dn *Daemon) syncNode(key string) error {
 	// and then proceeds to check the state of the node, which includes
 	// finalizing an update and/or reconciling the current and desired machine configs.
 	if dn.booting {
+		// write MHC initial config to disk here
 		// Be sure only the MCD is running now, disable -firstboot.service
 		if err := upgradeHackFor44AndBelow(); err != nil {
 			return err
@@ -708,6 +768,7 @@ func (dn *Daemon) syncNode(key string) error {
 			return err
 		}
 
+		dn.daemonHealthEvents.AnnotatedEventf(&dn.healthPod, annos, corev1.EventTypeNormal, "TriggeringUpdate", "Updating MCO to new MachineConfig %s", desired.Name)
 		if err := dn.triggerUpdateWithMachineConfig(current, desired, true); err != nil {
 			return err
 		}
@@ -1219,6 +1280,32 @@ func (dn *Daemon) startConfigDriftMonitor() {
 		}
 	}()
 }
+
+/*
+func (dn *Daemon) setPoolHealthProgression(phase v1.MachineConfigPoolProgression, subphase, message string) error {
+	// get node roles, pass it to this function
+	// this function should then get that pool and set some stuff
+	p, err := dn.mcpLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	for _, pool := range p {
+		selector, err := metav1.LabelSelectorAsSelector(pool.Spec.NodeSelector)
+		if err != nil {
+			return fmt.Errorf("invalid label selector: %w", err)
+		}
+
+		// If a pool with a nil or empty selector creeps in, it should match nothing, not everything.
+		if selector.Empty() || !selector.Matches(labels.Set(dn.node.Labels)) {
+			continue
+		}
+
+		// this is our pool
+		return ctrlcommon.SetPoolHealthProgression(*pool, phase, subphase, message)
+	}
+	return fmt.Errorf("pool not found")
+}
+*/
 
 func (dn *Daemon) stopConfigDriftMonitor() {
 	dn.configDriftMonitor.Stop()
@@ -1765,6 +1852,8 @@ func (dn *Daemon) checkStateOnFirstRun() error {
 	return dn.triggerUpdateWithMachineConfig(state.currentConfig, state.desiredConfig, true)
 }
 
+// this is the actual process of updating a node
+//
 // updateConfigAndState updates node to desired state, labels nodes as done and uncordon
 func (dn *Daemon) updateConfigAndState(state *stateAndConfigs) (bool, error) {
 
@@ -1998,7 +2087,15 @@ func (dn *Daemon) triggerUpdateWithMachineConfig(currentConfig, desiredConfig *m
 
 	// Shut down the Config Drift Monitor since we'll be performing an update
 	// and the config will "drift" while the update is occurring.
+
+	// a mode for stopping cfgDriftMonitor
+	//
 	dn.stopConfigDriftMonitor()
+
+	// we need to do this but it needs to reach into the controller....
+	// without annotations
+	// dn.UpgradeProgression
+	//dn.setPoolHealthProgression(v1.MachineConfigPoolUpdatePreparing, "stopping config drift monitor", "")
 
 	// run the update process. this function doesn't currently return.
 	return dn.update(currentConfig, desiredConfig, skipCertificateWrite)

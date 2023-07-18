@@ -1,0 +1,8 @@
+apiVersion: machineconfiguration.openshift.io/v1
+kind: Health
+metadata:
+  name: machine-config-health
+  annotations:
+    machineconfiguration.openshift.io/generated-by-version: "{{ .Version }}"
+spec:
+{{toYAML .Health | toString | indent 2}} # would this need to be in the MCC Spec?
