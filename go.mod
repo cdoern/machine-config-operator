@@ -1,6 +1,6 @@
 module github.com/openshift/machine-config-operator
 
-go 1.20
+go 1.21
 
 require (
 	github.com/BurntSushi/toml v1.3.2
@@ -47,7 +47,7 @@ require (
 	k8s.io/kubectl v0.27.3
 	k8s.io/kubelet v0.27.3
 	k8s.io/utils v0.0.0-20230505201702-9f6742963106
-	sigs.k8s.io/controller-runtime v0.13.0
+	sigs.k8s.io/controller-runtime v0.15.0
 )
 
 require (
