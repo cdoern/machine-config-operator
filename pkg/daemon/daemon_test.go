@@ -331,39 +331,39 @@ func TestSetRunningKargs(t *testing.T) {
 	newIgnCfg := ctrlcommon.NewIgnConfig()
 	newConfig := helpers.CreateMachineConfigFromIgnition(newIgnCfg)
 	newConfig.ObjectMeta = metav1.ObjectMeta{Name: "newconfig"}
-	diff, err := newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err := newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.True(t, diff.isEmpty())
 
 	cmdline := "BOOT_IMAGE=(hd0,gpt3)/ostree/rhcos-c3b004db4/vmlinuz-5.14.0-284.23.1.el9_2.x86_64 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller=1"
 	newConfig.Spec.KernelArguments = []string{"systemd.unified_cgroup_hierarchy=0", "systemd.legacy_systemd_cgroup_controller=1"}
 	_ = setRunningKargsWithCmdline(oldConfig, newConfig.Spec.KernelArguments, []byte(cmdline))
-	diff, err = newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err = newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.True(t, diff.isEmpty())
 
 	newConfig.Spec.KernelArguments = []string{"systemd.legacy_systemd_cgroup_controller=1", "systemd.unified_cgroup_hierarchy=0"}
-	diff, err = newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err = newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.False(t, diff.isEmpty())
 	assert.True(t, diff.kargs)
 
 	newConfig.Spec.KernelArguments = []string{"systemd.unified_cgroup_hierarchy=0", "systemd.legacy_systemd_cgroup_controller=1", "systemd.unified_cgroup_hierarchy=0"}
-	diff, err = newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err = newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.False(t, diff.isEmpty())
 	assert.True(t, diff.kargs)
 
 	cmdline = "BOOT_IMAGE=(hd0,gpt3)/ostree/rhcos-c3b004db4/vmlinuz-5.14.0-284.23.1.el9_2.x86_64 systemd.unified_cgroup_hierarchy=0 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller=1"
 	_ = setRunningKargsWithCmdline(oldConfig, newConfig.Spec.KernelArguments, []byte(cmdline))
-	diff, err = newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err = newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.False(t, diff.isEmpty())
 	assert.True(t, diff.kargs)
 
 	cmdline = "BOOT_IMAGE=(hd0,gpt3)/ostree/rhcos-c3b004db4/vmlinuz-5.14.0-284.23.1.el9_2.x86_64 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller=1 systemd.unified_cgroup_hierarchy=0"
 	_ = setRunningKargsWithCmdline(oldConfig, newConfig.Spec.KernelArguments, []byte(cmdline))
-	diff, err = newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err = newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.True(t, diff.isEmpty())
 }

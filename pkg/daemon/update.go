@@ -33,6 +33,7 @@ import (
 	"github.com/openshift/machine-config-operator/pkg/daemon/constants"
 	pivottypes "github.com/openshift/machine-config-operator/pkg/daemon/pivot/types"
 	pivotutils "github.com/openshift/machine-config-operator/pkg/daemon/pivot/utils"
+	"github.com/openshift/machine-config-operator/pkg/update"
 	"github.com/openshift/machine-config-operator/pkg/upgrademonitor"
 )
 
@@ -244,7 +245,7 @@ func (dn *Daemon) compareMachineConfig(oldConfig, newConfig *mcfgv1.MachineConfi
 	oldConfig = canonicalizeEmptyMC(oldConfig)
 	oldConfigName := oldConfig.GetName()
 	newConfigName := newConfig.GetName()
-	mcDiff, err := newMachineConfigDiff(oldConfig, newConfig)
+	mcDiff, _, err := newMachineConfigDiff(oldConfig, newConfig)
 	if err != nil {
 		return true, fmt.Errorf("error creating machineConfigDiff for comparison: %w", err)
 	}
@@ -276,13 +277,13 @@ func podmanCopy(imgURL, osImageContentDir string) (err error) {
 
 	// Pull the container image
 	var authArgs []string
-	if _, err := os.Stat(kubeletAuthFile); err == nil {
-		authArgs = append(authArgs, "--authfile", kubeletAuthFile)
+	if _, err := os.Stat(update.KubeletAuthFile); err == nil {
+		authArgs = append(authArgs, "--authfile", update.KubeletAuthFile)
 	}
 	args := []string{"pull", "-q"}
 	args = append(args, authArgs...)
 	args = append(args, imgURL)
-	_, err = pivotutils.RunExtBackground(numRetriesNetCommands, "podman", args...)
+	_, err = pivotutils.RunExtBackground(update.NumRetriesNetCommands, "podman", args...)
 	if err != nil {
 		return
 	}
@@ -301,7 +302,7 @@ func podmanCopy(imgURL, osImageContentDir string) (err error) {
 	// copy the content from create container locally into a temp directory under /run/machine-os-content/
 	cid := strings.TrimSpace(string(cidBuf))
 	args = []string{"cp", fmt.Sprintf("%s:/", cid), osImageContentDir}
-	_, err = pivotutils.RunExtBackground(numRetriesNetCommands, "podman", args...)
+	_, err = pivotutils.RunExtBackground(update.NumRetriesNetCommands, "podman", args...)
 	if err != nil {
 		return
 	}
@@ -340,7 +341,7 @@ func removePendingDeployment() error {
 // applyOSChanges extracts the OS image and adds coreos-extensions repo if we have either OS update or package layering to perform
 func (dn *CoreOSDaemon) applyOSChanges(mcDiff machineConfigDiff, oldConfig, newConfig *mcfgv1.MachineConfig) (retErr error) {
 	// We previously did not emit this event when kargs changed, so we still don't
-	if mcDiff.osUpdate || mcDiff.extensions || mcDiff.kernelType {
+	if mcDiff.osUpdate || mcDiff.osUpdate || mcDiff.kernelType {
 		// We emitted this event before, so keep it
 		if dn.nodeWriter != nil {
 			dn.nodeWriter.Eventf(corev1.EventTypeNormal, "InClusterUpgrade", fmt.Sprintf("Updating from oscontainer %s", newConfig.Spec.OSImageURL))
@@ -362,7 +363,7 @@ func (dn *CoreOSDaemon) applyOSChanges(mcDiff machineConfigDiff, oldConfig, newC
 
 		// Throw started/staged events only if there is any update required for the OS
 		if dn.nodeWriter != nil {
-			dn.nodeWriter.Eventf(corev1.EventTypeNormal, "OSUpdateStarted", mcDiff.osChangesString())
+			dn.nodeWriter.Eventf(corev1.EventTypeNormal, "OSUpdateStarted", mcDiff.OSChangesString())
 		}
 
 		if err := dn.applyLayeredOSChanges(mcDiff, oldConfig, newConfig); err != nil {
@@ -411,7 +412,7 @@ func (dn *CoreOSDaemon) applyOSChanges(mcDiff machineConfigDiff, oldConfig, newC
 func calculatePostConfigChangeActionFromFileDiffs(diffFileSet []string) (actions []string) {
 	filesPostConfigChangeActionNone := []string{
 		caBundleFilePath,
-		imageRegistryAuthFile,
+		update.ImageRegistryAuthFile,
 		"/var/lib/kubelet/config.json",
 	}
 	filesPostConfigChangeActionReloadCrio := []string{
@@ -845,7 +846,7 @@ func (dn *Daemon) update(oldConfig, newConfig *mcfgv1.MachineConfig, skipCertifi
 	}()
 
 	if dn.os.IsCoreOSVariant() {
-		coreOSDaemon := CoreOSDaemon{dn}
+		coreOSDaemon := CoreOSDaemon{Daemon: dn}
 		if err := coreOSDaemon.applyOSChanges(*diff, oldConfig, newConfig); err != nil {
 			return err
 		}
@@ -954,7 +955,7 @@ func (dn *Daemon) updateHypershift(oldConfig, newConfig *mcfgv1.MachineConfig, d
 	}()
 
 	if dn.os.IsCoreOSVariant() {
-		coreOSDaemon := CoreOSDaemon{dn}
+		coreOSDaemon := CoreOSDaemon{Daemon: dn}
 		if err := coreOSDaemon.applyOSChanges(*diff, oldConfig, newConfig); err != nil {
 			return err
 		}
@@ -994,50 +995,6 @@ func (dn *Daemon) removeRollback() error {
 	return runRpmOstree("cleanup", "-r")
 }
 
-// machineConfigDiff represents an ad-hoc difference between two MachineConfig objects.
-// At some point this may change into holding just the files/units that changed
-// and the MCO would just operate on that.  For now we're just doing this to get
-// improved logging.
-type machineConfigDiff struct {
-	osUpdate   bool
-	kargs      bool
-	fips       bool
-	passwd     bool
-	files      bool
-	units      bool
-	kernelType bool
-	extensions bool
-}
-
-// isEmpty returns true if the machineConfigDiff has no changes, or
-// in other words if the two MachineConfig objects are equivalent from
-// the MCD's point of view.  This is mainly relevant if e.g. two MC
-// objects happen to have different Ignition versions but are otherwise
-// the same.  (Probably a better way would be to canonicalize)
-func (mcDiff *machineConfigDiff) isEmpty() bool {
-	emptyDiff := machineConfigDiff{}
-	return reflect.DeepEqual(mcDiff, &emptyDiff)
-}
-
-// osChangesString generates a human-readable set of changes from the diff
-func (mcDiff *machineConfigDiff) osChangesString() string {
-	changes := []string{}
-	if mcDiff.osUpdate {
-		changes = append(changes, "Upgrading OS")
-	}
-	if mcDiff.extensions {
-		changes = append(changes, "Installing extensions")
-	}
-	if mcDiff.kernelType {
-		changes = append(changes, "Changing kernel type")
-	}
-	if mcDiff.kargs {
-		changes = append(changes, "Changing kernel arguments")
-	}
-
-	return strings.Join(changes, "; ")
-}
-
 // canonicalizeKernelType returns a valid kernelType. We consider empty("") and default kernelType as same
 func canonicalizeKernelType(kernelType string) string {
 	if kernelType == ctrlcommon.KernelTypeRealtime {
@@ -1046,35 +1003,6 @@ func canonicalizeKernelType(kernelType string) string {
 		return ctrlcommon.KernelType64kPages
 	}
 	return ctrlcommon.KernelTypeDefault
-}
-
-// newMachineConfigDiff compares two MachineConfig objects.
-func newMachineConfigDiff(oldConfig, newConfig *mcfgv1.MachineConfig) (*machineConfigDiff, error) {
-	oldIgn, err := ctrlcommon.ParseAndConvertConfig(oldConfig.Spec.Config.Raw)
-	if err != nil {
-		return nil, fmt.Errorf("parsing old Ignition config failed with error: %w", err)
-	}
-	newIgn, err := ctrlcommon.ParseAndConvertConfig(newConfig.Spec.Config.Raw)
-	if err != nil {
-		return nil, fmt.Errorf("parsing new Ignition config failed with error: %w", err)
-	}
-
-	// Both nil and empty slices are of zero length,
-	// consider them as equal while comparing KernelArguments in both MachineConfigs
-	kargsEmpty := len(oldConfig.Spec.KernelArguments) == 0 && len(newConfig.Spec.KernelArguments) == 0
-	extensionsEmpty := len(oldConfig.Spec.Extensions) == 0 && len(newConfig.Spec.Extensions) == 0
-
-	force := forceFileExists()
-	return &machineConfigDiff{
-		osUpdate:   oldConfig.Spec.OSImageURL != newConfig.Spec.OSImageURL || force,
-		kargs:      !(kargsEmpty || reflect.DeepEqual(oldConfig.Spec.KernelArguments, newConfig.Spec.KernelArguments)),
-		fips:       oldConfig.Spec.FIPS != newConfig.Spec.FIPS,
-		passwd:     !reflect.DeepEqual(oldIgn.Passwd, newIgn.Passwd),
-		files:      !reflect.DeepEqual(oldIgn.Storage.Files, newIgn.Storage.Files),
-		units:      !reflect.DeepEqual(oldIgn.Systemd.Units, newIgn.Systemd.Units),
-		kernelType: canonicalizeKernelType(oldConfig.Spec.KernelType) != canonicalizeKernelType(newConfig.Spec.KernelType),
-		extensions: !(extensionsEmpty || reflect.DeepEqual(oldConfig.Spec.Extensions, newConfig.Spec.Extensions)),
-	}, nil
 }
 
 // reconcilable checks the configs to make sure that the only changes requested
@@ -1187,7 +1115,7 @@ func reconcilable(oldConfig, newConfig *mcfgv1.MachineConfig) (*machineConfigDif
 
 	// we made it through all the checks. reconcile away!
 	klog.V(2).Info("Configs are reconcilable")
-	mcDiff, err := newMachineConfigDiff(oldConfig, newConfig)
+	mcDiff, _, err := newMachineConfigDiff(oldConfig, newConfig)
 	if err != nil {
 		return nil, fmt.Errorf("error creating machineConfigDiff: %w", err)
 	}
@@ -2177,64 +2105,9 @@ func removeNonIgnitionKeyPathFragments() error {
 	return nil
 }
 
-// InplaceUpdateViaNewContainer runs rpm-ostree ex deploy-via-self
-// via a privileged container.  This is needed on firstboot of old
-// nodes as well as temporarily for 4.11 -> 4.12 upgrades.
-func (dn *Daemon) InplaceUpdateViaNewContainer(target string) error {
-	// HACK: Disable selinux enforcement for this because it's not
-	// really easily possible to get the correct install_t context
-	// here when run from a container image.
-	// xref https://issues.redhat.com/browse/MCO-396
-	enforceFile := "/sys/fs/selinux/enforce"
-	enforcingBuf, err := os.ReadFile(enforceFile)
-	var enforcing bool
-	if err != nil {
-		if os.IsNotExist(err) {
-			enforcing = false
-		} else {
-			return fmt.Errorf("failed to read %s: %w", enforceFile, err)
-		}
-	} else {
-		enforcingStr := string(enforcingBuf)
-		v, err := strconv.Atoi(strings.TrimSpace(enforcingStr))
-		if err != nil {
-			return fmt.Errorf("failed to parse selinux enforcing %v: %w", enforcingBuf, err)
-		}
-		enforcing = (v == 1)
-	}
-	if enforcing {
-		if err := runCmdSync("setenforce", "0"); err != nil {
-			return err
-		}
-	} else {
-		klog.Info("SELinux is not enforcing")
-	}
-
-	systemdPodmanArgs := []string{"--unit", "machine-config-daemon-update-rpmostree-via-container", "-p", "EnvironmentFile=-/etc/mco/proxy.env", "--collect", "--wait", "--", "podman"}
-	pullArgs := append([]string{}, systemdPodmanArgs...)
-	pullArgs = append(pullArgs, "pull", "--authfile", "/var/lib/kubelet/config.json", target)
-	err = runCmdSync("systemd-run", pullArgs...)
-	if err != nil {
-		return err
-	}
-
-	runArgs := append([]string{}, systemdPodmanArgs...)
-	runArgs = append(runArgs, "run", "--env-file", "/etc/mco/proxy.env", "--privileged", "--pid=host", "--net=host", "--rm", "-v", "/:/run/host", target, "rpm-ostree", "ex", "deploy-from-self", "/run/host")
-	err = runCmdSync("systemd-run", runArgs...)
-	if err != nil {
-		return err
-	}
-	if enforcing {
-		if err := runCmdSync("setenforce", "1"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // queueRevertKernelSwap undoes the layering of the RT kernel or kernel-64k hugepages
 func (dn *Daemon) queueRevertKernelSwap() error {
-	booted, _, err := dn.NodeUpdaterClient.GetBootedAndStagedDeployment()
+	booted, _, err := dn.NodeLayeredUpdaterClient.GetBootedAndStagedDeployment()
 	if err != nil {
 		return err
 	}
@@ -2282,6 +2155,12 @@ func (dn *Daemon) queueRevertKernelSwap() error {
 	return nil
 }
 
+func (dn *Daemon) updateContainerizedOS(config *mcfgv1.MachineConfig) error {
+	newURL := config.Spec.OSImageURL
+	klog.Info("Updating OS using bootc")
+	return dn.updateContainerizedOSToPullSpec(newURL)
+}
+
 // updateLayeredOS updates the system OS to the one specified in newConfig
 func (dn *Daemon) updateLayeredOS(config *mcfgv1.MachineConfig) error {
 	newURL := config.Spec.OSImageURL
@@ -2289,8 +2168,17 @@ func (dn *Daemon) updateLayeredOS(config *mcfgv1.MachineConfig) error {
 	return dn.updateLayeredOSToPullspec(newURL)
 }
 
+func (dn *Daemon) updateContainerizedOSToPullSpec(newURL string) error {
+	//	newEnough, err := dn.NodeLayeredUpdaterClient.IsNewEnoughForBootc()
+	if err := dn.NodeContainerizedUpdaterClient.BootcUpdate(newURL); err != nil {
+		return err
+	}
+	return nil
+
+}
+
 func (dn *Daemon) updateLayeredOSToPullspec(newURL string) error {
-	newEnough, err := dn.NodeUpdaterClient.IsNewEnoughForLayering()
+	newEnough, err := dn.NodeLayeredUpdaterClient.IsNewEnoughForLayering()
 	if err != nil {
 		return err
 	}
@@ -2302,7 +2190,7 @@ func (dn *Daemon) updateLayeredOSToPullspec(newURL string) error {
 		if err := dn.InplaceUpdateViaNewContainer(newURL); err != nil {
 			return err
 		}
-	} else if err := dn.NodeUpdaterClient.RebaseLayered(newURL); err != nil {
+	} else if err := dn.NodeLayeredUpdaterClient.RebaseLayered(newURL); err != nil {
 		return fmt.Errorf("failed to update OS to %s : %w", newURL, err)
 	}
 
@@ -2469,8 +2357,8 @@ func (dn *CoreOSDaemon) applyLayeredOSChanges(mcDiff machineConfigDiff, oldConfi
 
 	// Update OS
 	if mcDiff.osUpdate {
-		if err := dn.updateLayeredOS(newConfig); err != nil {
-			mcdPivotErr.Inc()
+		err = dn.Updater.ApplyUpdate(newConfig)
+		if err != nil {
 			return err
 		}
 		if dn.nodeWriter != nil {
@@ -2501,4 +2389,33 @@ func (dn *CoreOSDaemon) applyLayeredOSChanges(mcDiff machineConfigDiff, oldConfi
 
 	// Apply extensions
 	return dn.applyExtensions(oldConfig, newConfig)
+}
+
+// runGetOut executes a command, logging it, and return the stdout output.
+func runGetOut(command string, args ...string) ([]byte, error) {
+	klog.Infof("Running captured: %s %s", command, strings.Join(args, " "))
+	cmd := exec.Command(command, args...)
+	rawOut, err := cmd.Output()
+	if err != nil {
+		errtext := ""
+		if e, ok := err.(*exec.ExitError); ok {
+			// Trim to max of 256 characters
+			errtext = fmt.Sprintf("\n%s", truncate(string(e.Stderr), 256))
+		}
+		return nil, fmt.Errorf("error running %s %s: %s%s", command, strings.Join(args, " "), err, errtext)
+	}
+	return rawOut, nil
+}
+
+// truncate a string using runes/codepoints as limits.
+// This specifically will avoid breaking a UTF-8 value.
+func truncate(input string, limit int) string {
+	asRunes := []rune(input)
+	l := len(asRunes)
+
+	if limit >= l {
+		return input
+	}
+
+	return fmt.Sprintf("%s [%d more chars]", string(asRunes[:limit]), l-limit)
 }

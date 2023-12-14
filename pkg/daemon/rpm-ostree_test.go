@@ -3,6 +3,7 @@ package daemon
 import (
 	"testing"
 
+	"github.com/openshift/machine-config-operator/pkg/update"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
 )
@@ -16,7 +17,7 @@ func TestParseVersion(t *testing.T) {
    - compose
    - rhsm
 `
-	var q RpmOstreeVersionData
+	var q update.RpmOstreeVersionData
 	if err := yaml.UnmarshalStrict([]byte(verdata), &q); err != nil {
 		panic(err)
 	}

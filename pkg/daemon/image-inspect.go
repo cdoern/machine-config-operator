@@ -11,12 +11,27 @@ import (
 	"github.com/containers/image/v5/manifest"
 	"github.com/containers/image/v5/types"
 	digest "github.com/opencontainers/go-digest"
+	"github.com/openshift/machine-config-operator/pkg/update"
 )
 
 const (
 	// Number of retry we want to perform
 	cmdRetriesCount = 2
 )
+
+// IsBootableImage determines if the image is a bootable (new container formet) image, or a wrapper (old container format)
+func IsBootableImage(imgURL string) (bool, error) {
+
+	var isBootableImage string
+	var imageData *types.ImageInspectInfo
+	var err error
+	if imageData, _, err = imageInspect(imgURL); err != nil {
+		return false, err
+	}
+	isBootableImage = imageData.Labels["ostree.bootable"]
+
+	return isBootableImage == "true", nil
+}
 
 // newDockerImageSource creates an image source for an image reference.
 // The caller must call .Close() on the returned ImageSource.
@@ -53,7 +68,7 @@ func imageInspect(imageName string) (*types.ImageInspectInfo, *digest.Digest, er
 	}
 
 	ctx := context.Background()
-	sys := &types.SystemContext{AuthFilePath: ostreeAuthFile}
+	sys := &types.SystemContext{AuthFilePath: update.OStreeAuthFile}
 
 	// retry.IfNecessary takes into account whether the error is "retryable"
 	// so we don't keep looping on errors that will never resolve

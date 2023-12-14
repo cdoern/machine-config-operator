@@ -62,16 +62,6 @@ func setupTempDirWithEtc(t *testing.T) (string, func()) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	assert.Equal(t, truncate("", 10), "")
-	assert.Equal(t, truncate("", 1), "")
-	assert.Equal(t, truncate("a", 1), "a")
-	assert.Equal(t, truncate("abcde", 1), "a [4 more chars]")
-	assert.Equal(t, truncate("abcde", 4), "abcd [1 more chars]")
-	assert.Equal(t, truncate("abcde", 7), "abcde")
-	assert.Equal(t, truncate("abcde", 5), "abcde")
-}
-
 func TestRunCmdSync(t *testing.T) {
 	err := runCmdSync("echo", "hello", "world")
 	assert.Nil(t, err)
@@ -216,12 +206,12 @@ func TestMachineConfigDiff(t *testing.T) {
 	newIgnCfg := ctrlcommon.NewIgnConfig()
 	newConfig := helpers.CreateMachineConfigFromIgnition(newIgnCfg)
 	newConfig.ObjectMeta = metav1.ObjectMeta{Name: "newconfig"}
-	diff, err := newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err := newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.True(t, diff.isEmpty())
 
 	newConfig.Spec.OSImageURL = "quay.io/example/foo@sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c"
-	diff, err = newMachineConfigDiff(oldConfig, newConfig)
+	diff, _, err = newMachineConfigDiff(oldConfig, newConfig)
 	assert.Nil(t, err)
 	assert.False(t, diff.isEmpty())
 	assert.True(t, diff.osUpdate)
@@ -230,7 +220,7 @@ func TestMachineConfigDiff(t *testing.T) {
 	otherEmptyMc := canonicalizeEmptyMC(nil)
 	emptyMc.Spec.KernelArguments = nil
 	otherEmptyMc.Spec.KernelArguments = []string{}
-	diff, err = newMachineConfigDiff(emptyMc, otherEmptyMc)
+	diff, _, err = newMachineConfigDiff(emptyMc, otherEmptyMc)
 	assert.Nil(t, err)
 	assert.True(t, diff.isEmpty())
 
@@ -293,7 +283,7 @@ func TestMachineConfigDiff(t *testing.T) {
 			newIgnCfg.Passwd.Users = testCase.passwdUsers
 			newMC := helpers.CreateMachineConfigFromIgnition(newIgnCfg)
 
-			diff, err = newMachineConfigDiff(testCase.baseMC, newMC)
+			diff, _, err = newMachineConfigDiff(testCase.baseMC, newMC)
 			assert.Nil(t, err)
 			assert.False(t, diff.isEmpty())
 			assert.True(t, diff.passwd)
@@ -328,7 +318,7 @@ func TestReconcilableDiff(t *testing.T) {
 	assert.Equal(t, diff.osUpdate, false)
 	assert.Equal(t, diff.passwd, false)
 	assert.Equal(t, diff.units, false)
-	assert.Equal(t, diff.files, true)
+	assert.Equal(t, diff.Files, true)
 
 	newConfig = newMachineConfigFromFiles(nil)
 	diff, err = reconcilable(oldConfig, newConfig)
@@ -336,7 +326,7 @@ func TestReconcilableDiff(t *testing.T) {
 	assert.Equal(t, diff.osUpdate, false)
 	assert.Equal(t, diff.passwd, false)
 	assert.Equal(t, diff.units, false)
-	assert.Equal(t, diff.files, true)
+	assert.Equal(t, diff.Files, true)
 
 	newConfig = newMachineConfigFromFiles(oldFiles)
 	newConfig.Spec.OSImageURL = "example.com/machine-os-content:new"
@@ -345,7 +335,7 @@ func TestReconcilableDiff(t *testing.T) {
 	assert.Equal(t, diff.osUpdate, true)
 	assert.Equal(t, diff.passwd, false)
 	assert.Equal(t, diff.units, false)
-	assert.Equal(t, diff.files, false)
+	assert.Equal(t, diff.Files, false)
 }
 
 func TestKernelAguments(t *testing.T) {
@@ -581,7 +571,7 @@ func TestInvalidIgnConfig(t *testing.T) {
 	newMcfg = helpers.CreateMachineConfigFromIgnition(newIgnConfig)
 	diff, err := reconcilable(oldMcfg, newMcfg)
 	assert.Nil(t, err, "Expected no error. Absolute paths should not fail general ignition validation")
-	assert.Equal(t, diff.files, true)
+	assert.Equal(t, diff.Files, true)
 }
 
 func TestDropinCheck(t *testing.T) {
@@ -757,7 +747,7 @@ func TestCalculatePostConfigChangeAction(t *testing.T) {
 			if err != nil {
 				t.Errorf("parsing new Ignition config failed: %v", err)
 			}
-			mcDiff, err := newMachineConfigDiff(test.oldConfig, test.newConfig)
+			mcDiff, _, err := newMachineConfigDiff(test.oldConfig, test.newConfig)
 			if err != nil {
 				t.Errorf("error creating machineConfigDiff: %v", err)
 			}
@@ -783,28 +773,6 @@ func checkIrreconcilableResults(t *testing.T, key string, reconcilableError erro
 	if reconcilableError == nil {
 		t.Errorf("Different %s values should not be reconcilable.", key)
 	}
-}
-
-func TestRunGetOut(t *testing.T) {
-	o, err := runGetOut("true")
-	assert.Nil(t, err)
-	assert.Equal(t, len(o), 0)
-
-	o, err = runGetOut("false")
-	assert.NotNil(t, err)
-
-	o, err = runGetOut("echo", "hello")
-	assert.Nil(t, err)
-	assert.Equal(t, string(o), "hello\n")
-
-	// base64 encode "oops" so we can't match on the command arguments
-	o, err = runGetOut("/bin/sh", "-c", "echo hello; echo b29wcwo= | base64 -d 1>&2; exit 1")
-	assert.Error(t, err)
-	errtext := err.Error()
-	assert.Contains(t, errtext, "exit status 1\noops\n")
-
-	o, err = runGetOut("/usr/bin/test-failure-to-exec-this-should-not-exist", "arg")
-	assert.Error(t, err)
 }
 
 // TestOriginalFileBackupRestore tests backikg up and restoring original files (files that are present in the base image and
