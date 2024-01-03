@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	buildv1 "github.com/openshift/api/build/v1"
 	configclientscheme "github.com/openshift/client-go/config/clientset/versioned/scheme"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1590,6 +1591,10 @@ func mergeCertWithCABundle(initialBundle, newBundle []byte, subject string) []by
 		initialBundle = next
 	}
 	return mergedBytes
+}
+
+func isBuildStatusConditionTrue(build *buildv1.Build, conditionType buildv1.BuildCondition) bool {
+	return false
 }
 
 func isPoolStatusConditionTrue(pool *mcfgv1.MachineConfigPool, conditionType mcfgv1.MachineConfigPoolConditionType) bool {

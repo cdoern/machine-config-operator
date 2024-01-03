@@ -166,6 +166,7 @@ func (ctrl *PodBuildController) syncPod(key string) error { //nolint:dupl // Thi
 }
 
 // Starts the Pod Build Controller.
+// if this cannot execute trigger CO Upgradeable=False
 func (ctrl *PodBuildController) Run(ctx context.Context, workers int) {
 	defer utilruntime.HandleCrash()
 	defer ctrl.queue.ShutDown()

@@ -302,8 +302,28 @@ func (optr *Operator) syncUpgradeableStatus() error {
 		Reason: asExpectedReason,
 	}
 
-	var updating, degraded bool
+	// do we want to know if MOB failed to start of if a OCB failed?
+	// if the later, we might need a "build status" obj for CO reporting
+	var updating, degraded, mobDegraded bool
+	var degradedPool string
+	mobDegraded = false
+	//	optr.isMachineOSBuilderRunning()
+	layeredMCPs, err := optr.getLayeredMachineConfigPools()
+	if err != nil {
+		return fmt.Errorf("could not get layered MachineConfigPools: %w", err)
+	}
+
+	// so we either need to a) use the build status conditions or b) use and augment the pool status conditions
+	// if we use the pool conditions, we can just say "is pool condition true for build failed?"
 	for _, pool := range pools {
+		for _, layeredMCP := range layeredMCPs {
+			if layeredMCP.Name == pool.Name {
+				if isPoolStatusConditionTrue(layeredMCP, mcfgv1.MachineConfigPoolBuildFailed) {
+					mobDegraded = true
+					degradedPool = layeredMCP.Name
+				}
+			}
+		}
 		// collect updating status but continue to check each pool to see if any pool is degraded
 		if isPoolStatusConditionTrue(pool, mcfgv1.MachineConfigPoolUpdating) {
 			updating = true
@@ -324,6 +344,13 @@ func (optr *Operator) syncUpgradeableStatus() error {
 		coStatus.Status = configv1.ConditionFalse
 		coStatus.Reason = "PoolUpdating"
 		coStatus.Message = "One or more machine config pools are updating, please see `oc get mcp` for further details"
+	}
+
+	// specifically set build failed if that is the cause of degredation
+	if mobDegraded && degraded {
+		coStatus.Status = configv1.ConditionFalse
+		coStatus.Reason = "BuildFailed"
+		coStatus.Message = fmt.Sprintf("On Cluster Image Build Failed. Pool %s is degraded", degradedPool)
 	}
 
 	// don't overwrite status if updating or degraded

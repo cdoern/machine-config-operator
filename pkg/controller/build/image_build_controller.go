@@ -162,6 +162,7 @@ func (ctrl *ImageBuildController) syncBuild(key string) error { //nolint:dupl //
 }
 
 // Starts the Image Build Controller.
+// if this cannot execute trigger CO Upgradeable=False
 func (ctrl *ImageBuildController) Run(ctx context.Context, workers int) {
 	defer utilruntime.HandleCrash()
 	defer ctrl.queue.ShutDown()

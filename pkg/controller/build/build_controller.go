@@ -127,6 +127,11 @@ type BuildControllerConfig struct {
 	MaxRetries int
 }
 
+type BuildControllerStatus struct {
+	Conditions []metav1.Condition
+	Running    bool
+}
+
 type ImageBuilder interface {
 	Run(context.Context, int)
 	StartBuild(ImageBuildRequest) (*corev1.ObjectReference, error)
@@ -155,6 +160,7 @@ type Controller struct {
 	queue workqueue.RateLimitingInterface
 
 	config       BuildControllerConfig
+	Status       BuildControllerStatus
 	imageBuilder ImageBuilder
 }
 
@@ -364,6 +370,8 @@ func (ctrl *Controller) processNextWorkItem() bool {
 
 // Reconciles the MachineConfigPool state with the state of an OpenShift Image
 // Builder object.
+// this is where we update the pool. We would need to also add some info about the build here?
+// or we could pull directly from these conditions in the optr.
 func (ctrl *Controller) imageBuildUpdater(build *buildv1.Build) error {
 	pool, err := ctrl.mcfgclient.MachineconfigurationV1().MachineConfigPools().Get(context.TODO(), build.Labels[targetMachineConfigPoolLabel], metav1.GetOptions{})
 	if err != nil {
@@ -460,10 +468,19 @@ func (ctrl *Controller) handleErr(err error, key interface{}) {
 		return
 	}
 
+	// we need to mark build failed whenever the num of max retries gets passed since most of these happen during the validation phase
+	mcp, err := ctrl.mcpLister.Get(key.(string))
+	if err != nil {
+		klog.Errorf("Could not get pool %s to handle OCB error. %w", key.(string), err)
+	}
+
 	utilruntime.HandleError(err)
+	ps := newPoolState(mcp)
+	ctrl.markBuildFailed(ps)
 	klog.V(2).Infof("Dropping machineconfigpool %q out of the queue: %v", key, err)
 	ctrl.queue.Forget(key)
 	ctrl.queue.AddAfter(key, 1*time.Minute)
+
 }
 
 // syncMachineConfigPool will sync the machineconfig pool with the given key.
@@ -479,6 +496,7 @@ func (ctrl *Controller) syncMachineConfigPool(key string) error {
 	if err != nil {
 		return err
 	}
+
 	machineconfigpool, err := ctrl.mcpLister.Get(name)
 	if k8serrors.IsNotFound(err) {
 		klog.V(2).Infof("MachineConfigPool %v has been deleted", key)

@@ -95,8 +95,16 @@ func runStartCmd(_ *cobra.Command, _ []string) {
 		klog.Fatalln(err)
 	}
 
+	// here issues are created, if we either fail NewBuilder or getBuildController, we need to let the operator know.
 	ctrl, err := getBuildController(ctx, cb)
 	if err != nil {
+		ctrl.Status.Conditions = append(ctrl.Status.Conditions, metav1.Condition{
+			Type:    "MOBFailed",
+			Status:  metav1.ConditionTrue,
+			Message: "MOB Failed to start",
+			Reason:  "MOBFailed",
+		})
+		ctrl.Status.Running = false
 		klog.Fatalln(err)
 	}
 
