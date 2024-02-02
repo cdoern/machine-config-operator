@@ -42,6 +42,9 @@ type imageInspection struct {
 	Os            string
 	Layers        []string
 }
+type BootcClient struct {
+	client bootcclient.Client
+}
 
 // RpmOstreeClient provides all RpmOstree related methods in one structure.
 // This structure implements DeploymentClient
@@ -63,6 +66,10 @@ func NewNodeUpdaterClient() RpmOstreeClient {
 // in case of error.
 func runRpmOstree(args ...string) error {
 	return runCmdSync("rpm-ostree", args...)
+}
+
+func runBootc(args ...string) error {
+	return runCmdSync("bootc", args...)
 }
 
 // See https://bugzilla.redhat.com/show_bug.cgi?id=2111817
@@ -234,6 +241,10 @@ func (r *RpmOstreeClient) IsNewEnoughForLayering() (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (b *BootcClient) BootcSwitch(imgURL string) (err error) {
+	return runBootc("switch", imgURL)
 }
 
 // RebaseLayered rebases system or errors if already rebased
